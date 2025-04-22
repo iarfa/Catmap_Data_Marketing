@@ -1,3 +1,5 @@
 .idea/
 *.parquet
 venv/
+__pycache__/
+*.xlsx
