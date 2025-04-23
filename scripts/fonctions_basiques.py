@@ -101,6 +101,11 @@ def choix_centre_departement(data, centres_departements):
     # Filtre sur le choix du département
     centre = centres_departements[centres_departements["Departement"] == choix_dep]
 
+    # Vérification que le filtre a renvoyé des résultats
+    if centre.empty:
+        #st.error(f"Aucun centre trouvé pour le département {choix_dep}. Veuillez vérifier les données.")
+        return None, None, None  # Retourner None pour éviter l'erreur
+
     # Extraction longitude et latitude
     lat_centre = centre["Latitude_centre"].iloc[0]
     lon_centre = centre["Longitude_centre"].iloc[0]

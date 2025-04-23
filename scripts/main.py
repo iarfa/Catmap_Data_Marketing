@@ -1,14 +1,15 @@
 # =======================
 # 📦 Imports & Librairies
 # =======================
-from functions_basics import (
+from fonctions_basiques import (
     chargement_donnees,
-    apercu_donnes,
+    apercu_donnees,
     filtrer_donnees,
     choix_centre_departement
 )
-from functions_cartographie import (
+from fonctions_cartographie import (
     transfo_geodataframe,
+    choix_carte,
     isochrone_polygon,
     isochrone_OSM
 )
@@ -28,7 +29,6 @@ path_centres_departements = "../data/Centres_departements.xlsx"
 personnalisation_page()
 affichage_titre()
 
-
 # =======================
 # 📥 Chargement des données
 # =======================
@@ -44,18 +44,25 @@ apercu_donnees(df_etablissements, 3)
 # =======================
 # 🧼 Filtrage utilisateur
 # =======================
-df_filtre = filtrer_donnees(df_etablissements)
+df_etablissements_filtre = filtrer_donnees(df_etablissements)
 
 # =======================
 # 🗺️ Choix du centre de carte
 # =======================
-lat_centre, lon_centre, departement_choisi = choix_centre_departement(
-    df_filtre, df_centres_dep
+departement_choisi, lat_centre, lon_centre = choix_centre_departement(
+    df_etablissements_filtre, df_centres_dep
 )
 
 # =======================
 # 📍 Transformation GeoDataFrame
 # =======================
 gdf_etablissements = transfo_geodataframe(
-    df_filtre, longitude_col="longitude", latitude_col="latitude", crs="EPSG:4326"
+    df_etablissements_filtre, longitude_col="longitude", latitude_col="latitude", crs="EPSG:4326"
 )
+
+# =======================
+# 📍 Affichage de la carte
+# =======================
+
+choix_carte(df_etablissements_filtre,lat_centre,lon_centre)
+
