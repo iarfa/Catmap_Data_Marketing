@@ -11,6 +11,7 @@ import pandas as pd
 import requests
 import streamlit as st
 from shapely.geometry import Point, Polygon
+from streamlit_folium import st_folium
 
 # Clé d'API pour OpenRouteService (à obtenir sur le site https://account.heigit.org/manage/key)
 API_KEY = "5b3ce3597851110001cf6248b6888bf013dd4b1c953908debff81ff1"
@@ -110,3 +111,161 @@ def isochrone_OSM(graph, lat, lon, travel_time=10, speed_kmh=30):
     except Exception as e:
         print(f"Erreur calcul : {e}")
         return None
+
+
+# Affichage de la carte (uniquement des points)
+def affichage_carte_points(data, lat_centre, lon_centre):
+    """
+    Objectif :
+        Afficher une carte des points pour la table filtrée dans Streamlit avec des cercles de rayon R
+
+    Paramètres :
+        data : Table filtrée par l'utilisateur
+        lat_centre : Latitude centre de la carte
+        lon_centre : Longitude centre de la carte
+
+    Sortie :
+        Carte interactive des établissements
+    """
+    if lat_centre is None or lon_centre is None:
+        st.warning("Veuillez sélectionner une zone pour afficher la carte.")
+
+    else :
+
+        # Initialisation de la carte
+        carte = folium.Map(location=[lat_centre, lon_centre], zoom_start=12)
+
+        # Ajout des marqueurs
+        for _, ligne in data.iterrows():
+            lat, lon = ligne['latitude'], ligne['longitude']
+            popup_info = f"""
+            <b>Nom entreprise :</b> {ligne['denominationUniteLegale']}<br>
+            <b>SIREN :</b> {ligne['siren']}<br>
+            <b>SIRET :</b> {ligne['siret']}<br>
+            <b>Date création :</b> {ligne['dateCreationEtablissement']}<br>
+            <b>Adresse :</b> {ligne['adresse']}<br>
+            <b>Précision géocodage :</b> {ligne['precision_geocodage']}
+            """
+
+            folium.CircleMarker(
+                location=[lat, lon],
+                radius=7,
+                color='blue',
+                fill=True,
+                fill_color='blue',
+                fill_opacity=0.6,
+                popup=folium.Popup(popup_info, max_width=300)
+            ).add_to(carte)
+
+        # Affichage via Streamlit
+        st_folium(carte, width=800, height=600)
+
+
+# Affichage de la carte avec un cercle de rayon R mètres
+def affichage_carte_cercles(data, lat_centre, lon_centre):
+    """
+    Objectif :
+        Afficher une carte des établissements avec un cercle d'influence autour de chacun
+
+    Paramètres :
+        data : Table filtrée par l'utilisateur (avec colonnes 'latitude', 'longitude', etc.)
+        lat_centre : Latitude du centre de la carte
+        lon_centre : Longitude du centre de la carte
+
+    Sortie :
+        Carte interactive des établissements avec cercles
+    """
+    if lat_centre is None or lon_centre is None:
+        st.warning("Veuillez sélectionner une zone pour afficher la carte.")
+        return
+
+    # Initialisation de la carte
+    carte = folium.Map(location=[lat_centre, lon_centre], zoom_start=12)
+
+    # Sélection du rayon d'influence
+    rayon_influence = st.slider(
+        "Rayon d'influence autour des établissements (en mètres)",
+        min_value=50,
+        max_value=2000,
+        value=200,
+        step=50
+    )
+
+    # Ajout des cercles + marqueurs
+    for _, ligne in data.iterrows():
+        lat = ligne.get('latitude') or ligne.geometry.y
+        lon = ligne.get('longitude') or ligne.geometry.x
+
+        popup_info = f"""
+        <b>Nom entreprise :</b> {ligne['denominationUniteLegale']}<br>
+        <b>SIREN :</b> {ligne['siren']}<br>
+        <b>SIRET :</b> {ligne['siret']}<br>
+        <b>Date création :</b> {ligne['dateCreationEtablissement']}<br>
+        <b>Adresse :</b> {ligne['adresse']}<br>
+        <b>Précision géocodage :</b> {ligne['precision_geocodage']}
+        """
+
+        # Cercle de rayon paramétré
+        folium.Circle(
+            location=[lat, lon],
+            radius=rayon_influence,
+            color='red',
+            fill=True,
+            fill_color='red',
+            fill_opacity=0.3
+        ).add_to(carte)
+
+        # Marqueur avec popup
+        folium.Marker(
+            location=[lat, lon],
+            popup=folium.Popup(popup_info, max_width=300),
+            icon=folium.Icon(color="red", icon="cloud")
+        ).add_to(carte)
+
+    # Affichage dans Streamlit
+    st_folium(carte, width=800, height=600)
+
+
+def choix_carte(data, lat_centre, lon_centre):
+    """
+    Objectif :
+        Afficher une carte parmi les différentes options disponibles (points, cercles)
+
+    Paramètres :
+        data : Table filtrée par l'utilisateur (avec colonnes 'latitude', 'longitude', etc.)
+        lat_centre : Latitude du centre de la carte
+        lon_centre : Longitude du centre de la carte
+
+    Sortie :
+        Carte interactive dans Streamlit (cercles ou points)
+    """
+
+    # Initialisation de l'état si non défini
+    if "affichage_mode" not in st.session_state:
+        st.session_state["affichage_mode"] = None
+
+    st.subheader("Afficher la carte des établissements")
+
+    # Boutons dans deux colonnes
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Afficher les points uniquement"):
+            st.session_state["affichage_mode"] = "points"
+
+    with col2:
+        if st.button("Afficher les cercles d'influence"):
+            st.session_state["affichage_mode"] = "cercles"
+
+    # Vérification des coordonnées
+    if lat_centre is None or lon_centre is None:
+        st.warning("Veuillez sélectionner une zone pour afficher la carte.")
+        return
+
+    # Affichage de la carte selon le mode choisi
+    if st.session_state["affichage_mode"] == "points":
+        affichage_carte_points(data, lat_centre, lon_centre)
+
+    elif st.session_state["affichage_mode"] == "cercles":
+        # Sélection du rayon avec un slider
+        affichage_carte_cercles(data, lat_centre, lon_centre)
