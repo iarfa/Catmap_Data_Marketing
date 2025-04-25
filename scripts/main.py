@@ -5,11 +5,16 @@ from fonctions_basiques import (
     chargement_donnees,
     apercu_donnees,
     filtrer_donnees,
-    choix_centre_departement
+    choix_centre_departement,
+    extraction_adresse_OSM,
+    choix_centre_OSM
 )
 from fonctions_cartographie import (
     transfo_geodataframe,
     choix_carte,
+    recherche_etablissements_osm,
+    interface_recherche_osm,
+    choix_carte_osm,
     isochrone_polygon,
     isochrone_OSM
 )
@@ -63,6 +68,26 @@ gdf_etablissements = transfo_geodataframe(
 # =======================
 # 📍 Affichage de la carte
 # =======================
-
 choix_carte(df_etablissements_filtre,lat_centre,lon_centre)
 
+# =======================
+# 📍 Choix de l'utilisateur
+# =======================
+df_etablissements_osm = interface_recherche_osm()
+
+# =======================
+# 📍 Traitements
+# =======================
+if df_etablissements_osm is not None and not df_etablissements_osm.empty:
+
+    # Simplification de l'adresse + ajout de précision géocodage
+    df_etablissements_osm[["adresse_simplifiee", "precision_geocodage"]] = df_etablissements_osm.apply(extraction_adresse_OSM,axis=1)
+
+    # Extraction du centre
+    lat_centre_OSM, lon_centre_OSM = choix_centre_OSM(df_etablissements_osm)
+
+    # Géodataframe
+    gdf_etablissements_osm = transfo_geodataframe(df_etablissements_osm, longitude_col="longitude", latitude_col="latitude", crs="EPSG:4326")
+
+    # Choix de la carte
+    choix_carte_osm(df_etablissements_osm,lat_centre_OSM,lon_centre_OSM)
