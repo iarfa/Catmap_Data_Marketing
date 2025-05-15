@@ -195,7 +195,8 @@ def affichage_carte_cercles(data, lat_centre, lon_centre):
         min_value=50,
         max_value=2000,
         value=200,
-        step=50
+        step=50,
+        key="slider_insee"
     )
 
     # Ajout des cercles + marqueurs
@@ -387,30 +388,41 @@ def interface_recherche_osm():
     # Nom des établissements à définir par l'utilisateur
     noms_etablissements_osm = st.text_input(
         "Entrez un ou plusieurs noms d'établissements (séparés par des virgules)",
-        placeholder="Ex : Carrefour, Lidl, Auchan"
+        placeholder="Ex : Carrefour, Lidl, Auchan",
+        value=st.session_state.get("noms_etablissements_osm", "")
     )
 
     # Nom des villes à définir par l'utilisateur
     villes_osm = st.text_input(
         "Entrez une ou plusieurs villes (séparées par des virgules)",
-        placeholder="Ex : Paris, Lyon, Marseille"
+        placeholder="Ex : Paris, Lyon, Marseille",
+        value=st.session_state.get("villes_osm", "")
     )
 
-    # Extraction
+    # Extraction des valeurs nettoyées
     noms_etablissements = [nom.strip() for nom in noms_etablissements_osm.split(",") if nom.strip()]
     villes = [ville.strip() for ville in villes_osm.split(",") if ville.strip()]
 
-    # Lancement de la fonction
-    if noms_etablissements and villes:
-        if st.button("Lancer la recherche"):
+    # Bouton de recherche
+    if st.button("Lancer la recherche", key="recherche_osm"):
+        st.session_state["noms_etablissements_osm"] = noms_etablissements_osm
+        st.session_state["villes_osm"] = villes_osm
+
+        if noms_etablissements and villes:
             df_resultats = recherche_etablissements_osm(noms_etablissements, villes)
-            return df_resultats
-    else:
-        st.info("Veuillez entrer au moins un nom d’établissement et une ville.")
-        return None
+            if df_resultats is not None and not df_resultats.empty:
+                st.session_state["df_etablissements_osm"] = df_resultats
+                st.success(f"{len(df_resultats)} établissements trouvés.")
+            else:
+                st.session_state["df_etablissements_osm"] = None
+                st.warning("Aucun établissement trouvé.")
+        else:
+            st.warning("Veuillez entrer au moins un nom d’établissement et une ville.")
+
+    # Affichage des résultats en session (même après clic bouton)
+    return st.session_state.get("df_etablissements_osm", None)
 
 
-# Affichage de la carte (uniquement des points)
 def affichage_carte_points_osm(data, lat_centre, lon_centre):
     """
     Objectif :
@@ -426,34 +438,55 @@ def affichage_carte_points_osm(data, lat_centre, lon_centre):
     """
     if lat_centre is None or lon_centre is None:
         st.warning("Veuillez sélectionner une zone pour afficher la carte.")
+        return
 
-    else :
+    couleurs = [
+        'red', 'blue', 'green', 'orange', 'purple', 'darkred', 'cadetblue',
+        'darkgreen', 'darkblue', 'pink', 'lightblue', 'lightgreen', 'beige',
+        'gray', 'black'
+    ]
 
-        # Initialisation de la carte
+    etablissements_uniques = data['nom_etablissement'].unique()
+    type_to_color = {nom: couleurs[i % len(couleurs)] for i, nom in enumerate(etablissements_uniques)}
+
+    # Création des colonnes : carte + légende
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
         carte = folium.Map(location=[lat_centre, lon_centre], zoom_start=12)
-
-        # Ajout des marqueurs
         for _, ligne in data.iterrows():
             lat, lon = ligne['latitude'], ligne['longitude']
+            nom = ligne['nom_etablissement']
+            color = type_to_color.get(nom, 'blue')
             popup_info = f"""
-            <b>Nom entreprise :</b> {ligne['nom_etablissement']}<br>
+            <b>Nom entreprise :</b> {nom}<br>
             <b>Adresse :</b> {ligne['adresse']}<br>
             <b>Précision géocodage :</b> {ligne['precision_geocodage']}
             """
-
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=7,
-                color='blue',
+                color=color,
                 fill=True,
-                fill_color='blue',
+                fill_color=color,
                 fill_opacity=0.6,
                 popup=folium.Popup(popup_info, max_width=300)
             ).add_to(carte)
 
-        # Affichage via Streamlit
-        st_folium(carte, width=800, height=600)
+        st_folium(carte, width=700, height=600)
 
+    with col2:
+        st.markdown("#### Légende")  # titre un peu plus petit
+        max_legende = 20
+        for i, (nom, color) in enumerate(type_to_color.items()):
+            if i >= max_legende:
+                st.markdown("*... (limité à 20)*")
+                break
+            st.markdown(
+                f'<span style="color:{color}; font-size:22px;">&#9679;</span> '
+                f'<span style="font-size:20px;">{nom}</span>',
+                unsafe_allow_html=True
+            )
 
 # Affichage de la carte avec un cercle de rayon R mètres
 def affichage_carte_cercles_osm(data, lat_centre, lon_centre):
@@ -473,48 +506,75 @@ def affichage_carte_cercles_osm(data, lat_centre, lon_centre):
         st.warning("Veuillez sélectionner une zone pour afficher la carte.")
         return
 
-    # Initialisation de la carte
-    carte = folium.Map(location=[lat_centre, lon_centre], zoom_start=12)
+    couleurs = [
+        'red', 'blue', 'green', 'orange', 'purple', 'darkred', 'cadetblue',
+        'darkgreen', 'darkblue', 'pink', 'lightblue', 'lightgreen', 'beige',
+        'gray', 'black'
+    ]
 
-    # Sélection du rayon d'influence
+    etablissements_uniques = data['nom_etablissement'].unique()
+    type_to_color = {nom: couleurs[i % len(couleurs)] for i, nom in enumerate(etablissements_uniques)}
+
     rayon_influence = st.slider(
         "Rayon d'influence autour des établissements (en mètres)",
         min_value=50,
         max_value=2000,
         value=200,
-        step=50
+        step=50,
+        key="slider_osm"
     )
 
-    # Ajout des cercles + marqueurs
-    for _, ligne in data.iterrows():
-        lat = ligne.get('latitude') or ligne.geometry.y
-        lon = ligne.get('longitude') or ligne.geometry.x
+    col1, col2 = st.columns([3, 1])
 
-        popup_info = f"""
-        <b>Nom entreprise :</b> {ligne['nom_etablissement']}<br>
-        <b>Adresse :</b> {ligne['adresse']}<br>
-        <b>Précision géocodage :</b> {ligne['precision_geocodage']}
-        """
+    with col1:
+        carte = folium.Map(location=[lat_centre, lon_centre], zoom_start=12)
 
-        # Cercle de rayon paramétré
-        folium.Circle(
-            location=[lat, lon],
-            radius=rayon_influence,
-            color='red',
-            fill=True,
-            fill_color='red',
-            fill_opacity=0.3
-        ).add_to(carte)
+        for _, ligne in data.iterrows():
+            lat = ligne.get('latitude') or ligne.geometry.y
+            lon = ligne.get('longitude') or ligne.geometry.x
+            nom = ligne['nom_etablissement']
+            color = type_to_color.get(nom, 'red')
 
-        # Marqueur avec popup
-        folium.Marker(
-            location=[lat, lon],
-            popup=folium.Popup(popup_info, max_width=300),
-            icon=folium.Icon(color="red", icon="cloud")
-        ).add_to(carte)
+            popup_info = f"""
+                <b>Nom entreprise :</b> {nom}<br>
+                <b>Adresse :</b> {ligne['adresse']}<br>
+                <b>Précision géocodage :</b> {ligne['precision_geocodage']}
+                """
 
-    # Affichage dans Streamlit
-    st_folium(carte, width=800, height=600)
+            folium.Circle(
+                location=[lat, lon],
+                radius=rayon_influence,
+                color=color,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.3
+            ).add_to(carte)
+
+            # Cercle plus petit coloré en overlay au centre (remplace Marker)
+            folium.CircleMarker(
+                location=[lat, lon],
+                radius=6,  # plus petit que le cercle d'influence
+                color=color,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.9,
+                popup=folium.Popup(popup_info, max_width=300)
+            ).add_to(carte)
+
+        st_folium(carte, width=700, height=600)
+
+    with col2:
+        st.markdown("#### Légende")
+        max_legende = 20
+        for i, (nom, color) in enumerate(type_to_color.items()):
+            if i >= max_legende:
+                st.markdown("*... (limité à 20)*")
+                break
+            st.markdown(
+                f'<span style="color:{color}; font-size:22px;">&#9679;</span> '
+                f'<span style="font-size:20px;">{nom}</span>',
+                unsafe_allow_html=True
+            )
 
 # Choisir le type de carte à afficher
 def choix_carte_osm(data, lat_centre, lon_centre):
@@ -531,6 +591,11 @@ def choix_carte_osm(data, lat_centre, lon_centre):
         Carte interactive dans Streamlit (cercles ou points)
     """
 
+    # Vérification des coordonnées du centre de la carte
+    if lat_centre is None or lon_centre is None:
+        st.warning("Veuillez sélectionner une zone pour afficher la carte.")
+        return
+
     # Initialisation de l'état si non défini
     if "affichage_mode" not in st.session_state:
         st.session_state["affichage_mode"] = None
@@ -541,11 +606,11 @@ def choix_carte_osm(data, lat_centre, lon_centre):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Afficher les points uniquement",key="osm_points"):
+        if st.button("Afficher les points uniquement",key="btn_osm_points"):
             st.session_state["affichage_mode"] = "points"
 
     with col2:
-        if st.button("Afficher les cercles d'influence",key="osm_cercles"):
+        if st.button("Afficher les cercles d'influence",key="btn_osm_cercles"):
             st.session_state["affichage_mode"] = "cercles"
 
     # Vérification des coordonnées

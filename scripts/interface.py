@@ -1,5 +1,6 @@
 # Librairies
 import streamlit as st
+from page_insee import page_insee
 
 
 # Personnalisation de la page
@@ -51,3 +52,26 @@ def affichage_titre():
         '<p class="footer">Explorez les données, analysez les tendances du marché, et optimisez vos stratégies commerciales.</p>',
         unsafe_allow_html=True,
     )
+    st.write("Bienvenue dans l'outil de Data Marketing. Choisissez une page dans le menu à gauche pour commencer.")
+
+# Navigation entre les différentes pages
+def navigation():
+    """
+    Objectif :
+        Afficher un sélecteur pour naviguer entre les pages.
+    """
+
+    with st.sidebar:
+        st.markdown("## 🧭 Navigation")
+        page_selectionnee = st.radio(
+            label="Choisissez une page :",
+            options=["🏠 Accueil", "📊 Données INSEE", "🗺️ Données OSM"],
+            index=0
+        )
+
+    if "Accueil" in page_selectionnee:
+        return "accueil"
+    elif "INSEE" in page_selectionnee:
+        return "insee"
+    elif "OSM" in page_selectionnee:
+        return "osm"
