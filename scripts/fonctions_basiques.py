@@ -42,7 +42,7 @@ def apercu_donnees(data, nb_lignes):
     st.markdown("<hr style='border:2px solid #ff7f0e;'>", unsafe_allow_html=True)
     st.header("📝 Aperçu des données")
     st.dataframe(data.head(nb_lignes))
-    st.write(f"Votre table contient {data.shape[0]} lignes et {data.shape[1]} colonnes")
+    st.write(f"La table INSEE contient {data.shape[0]} lignes et {data.shape[1]} colonnes")
 
 
 def filtrer_donnees(data):
