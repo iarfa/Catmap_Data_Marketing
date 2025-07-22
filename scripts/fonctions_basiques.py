@@ -1,29 +1,48 @@
-# Librairies
+# ==============================================
+# 📦 Imports & Librairies
+# ==============================================
 import pandas as pd
 import streamlit as st
 
+# ==============================================
+# Section chargement des données
+# ==============================================
 
-# Chargement des données
-def chargement_donnees(path_etablissement, path_centres_dpt):
-    """
-    Objectif :
-        Charger les données établissements et centres de département
+@st.cache_data
+def charger_etablissements(path_etablissement):
+    """Charge les données des établissements depuis un fichier Parquet."""
+    try:
+        return pd.read_parquet(path_etablissement)
+    except FileNotFoundError:
+        st.error(f"Fichier des établissements introuvable : {path_etablissement}")
+        return pd.DataFrame() # Retourne un dataframe vide en cas d'erreur
 
-    Paramètres :
-        path_etablissement : Chemin du fichier d'établissements
-        path_centres_dpt : Chemin du fichier de centres de départements
+@st.cache_data
+def charger_centres_departements(path_centres_dpt):
+    """Charge les données des centres de départements depuis un fichier Excel."""
+    try:
+        return pd.read_excel(path_centres_dpt)
+    except FileNotFoundError:
+        st.error(f"Fichier des centres de départements introuvable : {path_centres_dpt}")
+        return pd.DataFrame() # Retourne un dataframe vide en cas d'erreur
 
-    Sortie :
-        etablissements, centres_departements : Fichiers chargés
-    """
 
-    # Chargement
-    etablissements = pd.read_parquet(path_etablissement)
-    centres_departements = pd.read_excel(path_centres_dpt)
+@st.cache_data
+def charger_communes(path_communes):
+    """Charge les données des communes depuis un fichier Excel."""
+    try:
+        df = pd.read_excel(path_communes)
 
-    # Sortie
-    return etablissements, centres_departements
+        if 'Num_Dep' in df.columns:
+            df['Num_Dep'] = df['Num_Dep'].astype(str)
+        else:
+            st.error("La colonne 'Num_Dep' est manquante dans le fichier des communes.")
+            return pd.DataFrame()
 
+        return df
+    except FileNotFoundError:
+        st.error(f"Fichier des communes introuvable : {path_communes}")
+        return pd.DataFrame()
 
 # Aperçu des données
 def apercu_donnees(data, nb_lignes):
@@ -44,7 +63,7 @@ def apercu_donnees(data, nb_lignes):
     st.dataframe(data.head(nb_lignes))
     st.write(f"La table INSEE contient {data.shape[0]} lignes et {data.shape[1]} colonnes")
 
-
+# Filtre des données (INSEE)
 def filtrer_donnees(data):
     """
     Objectif :
@@ -76,7 +95,7 @@ def filtrer_donnees(data):
     # Sortie
     return data_filtree
 
-
+# Choix du centre département
 def choix_centre_departement(data, centres_departements):
     """
     Objectif :

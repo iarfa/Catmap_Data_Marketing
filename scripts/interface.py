@@ -2,7 +2,6 @@
 import streamlit as st
 from page_insee import page_insee
 
-
 # Personnalisation de la page
 def personnalisation_page():
     """
@@ -35,7 +34,6 @@ def personnalisation_page():
     """,
         unsafe_allow_html=True,
     )  # Permet d'afficher du html et CSS
-
 
 # Affichage titre
 def affichage_titre():

@@ -1,43 +1,29 @@
-# Librairies
-import os
-import time
+# ==============================================
+# 📦 Imports & Librairies
+# ==============================================
 import folium
 import geopandas as gpd
-# import networkx as nx # Semble inutilisé
-import numpy as np
-# import openrouteservice # Nous utilisons requests pour l'ORS local
-import osmnx as ox  # Utilisé dans isochrone_OSM (inchangée)
 import pandas as pd
-import requests  # Important pour appeler votre ORS local
-import json  # Pour construire le payload de la requête
+import requests
+import json
 import streamlit as st
-from shapely.geometry import Point, Polygon  # Utilisé dans isochrone_polygon (inchangée)
 from streamlit_folium import st_folium
 
+# ==============================================
+# Section fonctions générales
+# ==============================================
 
-# Clé d'API pour OpenRouteService (utilisée par la fonction isochrone_polygon existante)
-# API_KEY = "VOTRE_CLE_API_OPENROUTESERVICE_PUBLIQUE_SI_NECESSAIRE_AILLEURS"
-# client = openrouteservice.Client(key=API_KEY) # Utilisé par isochrone_polygon
-
-
-# Fonction de transformation en geodatraframe (INCHANGÉE)
+# Transformation en géodataframe
 def transfo_geodataframe(df, longitude_col, latitude_col, crs="EPSG:4326"):
     return gpd.GeoDataFrame(
         df, geometry=gpd.points_from_xy(df[longitude_col], df[latitude_col]), crs=crs
     )
 
-
-# =======================
-# Section Calcul isochrones (fonctions ORS publiques ou OSMnx inchangées)
-# =======================
-# Vos fonctions isochrone_polygon et isochrone_OSM restent ici si vous les utilisez ailleurs.
-# Pour l'affichage avec l'ORS local, nous faisons l'appel API directement dans les fonctions d'affichage.
-
 # ==============================================
-# Section base INSEE - Fonctions d'affichage
+# Section base INSEE
 # ==============================================
 
-# Affichage de la carte (uniquement des points) - INSEE (INCHANGÉE)
+# Affichage de la carte (INSEE)
 def affichage_carte_points(data, lat_centre, lon_centre):
     if lat_centre is None or lon_centre is None:
         st.warning("Veuillez sélectionner une zone pour afficher la carte.")
@@ -75,8 +61,7 @@ def affichage_carte_points(data, lat_centre, lon_centre):
         ).add_to(carte)
     st_folium(carte, width=800, height=600, returned_objects=[])
 
-
-# Affichage de la carte avec un cercle de rayon R mètres - INSEE (INCHANGÉE)
+# Affichage cartes cercles (INSEE)
 def affichage_carte_cercles(data, lat_centre, lon_centre):
     if lat_centre is None or lon_centre is None:
         st.warning("Veuillez sélectionner une zone pour afficher la carte.")
@@ -125,10 +110,7 @@ def affichage_carte_cercles(data, lat_centre, lon_centre):
         ).add_to(carte)
     st_folium(carte, width=800, height=600, returned_objects=[])
 
-
-# ===================================================
-# NOUVELLE FONCTION : Affichage Isochrones pour INSEE
-# ===================================================
+# Affichage des isochrones (INSEE)
 def affichage_isochrones_insee(data, lat_centre, lon_centre):
     """
     Objectif :
@@ -288,10 +270,7 @@ def affichage_isochrones_insee(data, lat_centre, lon_centre):
             f'<span style="color:purple; font-size:22px;">&#9632;</span> <span style="font-size:20px;">Zone d\'accessibilité</span>',
             unsafe_allow_html=True)
 
-
-# ===================================================
-# MODIFICATION : Choix du type de carte pour INSEE
-# ===================================================
+# Choix de la carte (INSEE)
 def choix_carte(data, lat_centre, lon_centre):
     """
     Objectif :
@@ -340,12 +319,11 @@ def choix_carte(data, lat_centre, lon_centre):
     elif st.session_state["affichage_mode_insee"] == "isochrones":
         affichage_isochrones_insee(data, lat_centre, lon_centre)
 
+# ==============================================
+# Section OSM
+# ==============================================
 
-# =======================
-# Section OSM (fonctions existantes inchangées ici, mais la nouvelle `choix_carte_osm` est ci-dessous)
-# =======================
-
-# Rechercher les établissements via open street map (INCHANGÉE)
+# Rechercher les établissements via open street map
 def recherche_etablissements_osm(noms_etablissements, villes, max_etablissements=1000):
     pays = "France"
     url = "https://nominatim.openstreetmap.org/search"
@@ -387,22 +365,80 @@ def recherche_etablissements_osm(noms_etablissements, villes, max_etablissements
         st.success(f"{len(df)} établissements trouvés.")
     return df
 
+# Choix de l'utilisateur pour la recherche OSM
+def interface_recherche_osm(df_geo):
+    """
+    Affiche une interface de recherche pour les établissements OSM avec une sélection
+    géographique hiérarchique (Région, Département, Commune).
 
-# Choix de l'utilisateur pour la recherche OSM (INCHANGÉE)
-def interface_recherche_osm():
+    Paramètres :
+        df_geo (pd.DataFrame) : DataFrame contenant les données des communes, départements et régions.
+    """
     st.subheader("Recherche d'établissements via OpenStreetMap")
+
+    if df_geo is None or df_geo.empty:
+        st.error("Les données géographiques n'ont pas pu être chargées. Le filtrage est désactivé.")
+        return pd.DataFrame()
+
+    # Saisie des noms d'établissements (inchangé)
     noms_etablissements_osm = st.text_input(
-        "Entrez un ou plusieurs noms d'établissements (séparés par des virgules)",
-        placeholder="Ex : Carrefour, Lidl, Auchan",
+        "1️⃣ Entrez un ou plusieurs noms d'établissements (séparés par des virgules)",
+        placeholder="Ex: Carrefour, Lidl, Auchan",
         value=st.session_state.get("noms_etablissements_osm", "")
     )
-    villes_osm = st.text_input(
-        "Entrez une ou plusieurs villes (séparées par des virgules)",
-        placeholder="Ex : Paris, Lyon, Marseille",
-        value=st.session_state.get("villes_osm", "")
+    noms_etablissements = [nom.strip() for nom in noms_etablissements_osm.split(",") if nom.strip()]
+
+    # Sélection de la zone géographique
+    st.markdown("2️⃣ Choisissez la zone de recherche")
+    maille_recherche = st.radio(
+        "Choisir la maille :",
+        ('Région', 'Département', 'Commune'),
+        horizontal=True, key="maille_osm"
     )
+
+    selection_geo = []
+    if maille_recherche == 'Région':
+        regions_disponibles = sorted(df_geo['Nom_Region'].unique())
+        selection_geo = st.multiselect("Choisissez une ou plusieurs régions", regions_disponibles, key="selection_region_osm")
+
+    elif maille_recherche == 'Département':
+        deps_disponibles = sorted(df_geo['Nom_Dep'].unique())
+        selection_geo = st.multiselect("Choisissez un ou plusieurs départements", deps_disponibles, key="selection_dep_osm")
+
+    elif maille_recherche == 'Commune':
+        deps_disponibles = sorted(df_geo['Nom_Dep'].unique())
+        dep_pour_communes = st.multiselect("D'abord, sélectionnez un ou plusieurs départements", deps_disponibles, key="dep_pour_commune_osm")
+        if dep_pour_communes:
+            communes_disponibles = sorted(df_geo[df_geo['Nom_Dep'].isin(dep_pour_communes)]['Nom_Ville'].unique())
+            selection_geo = st.multiselect("Puis, choisissez une ou plusieurs communes", communes_disponibles, key="selection_commune_osm")
+
+    # Lancement de la recherche
+    if st.button("Lancer la recherche", key="recherche_osm_nouveau"):
+        st.session_state["noms_etablissements_osm"] = noms_etablissements_osm
+
+        villes_a_chercher = []
+        if selection_geo:
+            if maille_recherche == 'Région':
+                villes_a_chercher = df_geo[df_geo['Nom_Region'].isin(selection_geo)]['Nom_Ville'].tolist()
+            elif maille_recherche == 'Département':
+                villes_a_chercher = df_geo[df_geo['Nom_Dep'].isin(selection_geo)]['Nom_Ville'].tolist()
+            elif maille_recherche == 'Commune':
+                villes_a_chercher = selection_geo
+
+        if noms_etablissements and villes_a_chercher:
+            with st.spinner(f"Recherche de '{', '.join(noms_etablissements)}' sur {len(villes_a_chercher)} commune(s)..."):
+                df_resultats = recherche_etablissements_osm(noms_etablissements, villes_a_chercher)
+            st.session_state["df_etablissements_osm"] = df_resultats if df_resultats is not None else pd.DataFrame()
+        else:
+            st.warning("Veuillez entrer au moins un nom d’établissement ET sélectionner une zone géographique.")
+
+    return st.session_state.get("df_etablissements_osm", pd.DataFrame())
+
+    # Sélection des établissements et des villes
     noms_etablissements = [nom.strip() for nom in noms_etablissements_osm.split(",") if nom.strip()]
     villes = [ville.strip() for ville in villes_osm.split(",") if ville.strip()]
+
+    # Recherche
     if st.button("Lancer la recherche", key="recherche_osm"):
         st.session_state["noms_etablissements_osm"] = noms_etablissements_osm
         st.session_state["villes_osm"] = villes_osm
@@ -417,8 +453,137 @@ def interface_recherche_osm():
             st.warning("Veuillez entrer au moins un nom d’établissement et une ville.")
     return st.session_state.get("df_etablissements_osm", pd.DataFrame())
 
+# Affichage de la carte des points OSM
+def interface_recherche_osm(df_geo):
+    """
+    Affiche une interface complète et dynamique pour la recherche d'établissements OSM.
 
-# Affichage de la carte des points OSM (INCHANGÉE)
+    Cette fonction gère la saisie des enseignes, la sélection géographique hiérarchique
+    (Région, Département, Commune), lance la recherche et stocke les résultats
+    dans l'état de la session Streamlit.
+
+    Args:
+        df_geo (pd.DataFrame): Un DataFrame contenant les données géographiques
+                               avec les colonnes 'Nom_Region', 'Nom_Dep', 'Num_Dep', 'Nom_Ville'.
+
+    Returns:
+        pd.DataFrame: Le DataFrame des résultats de la recherche, potentiellement vide.
+    """
+    st.subheader("Recherche d'établissements via OpenStreetMap")
+
+    # === Sécurité : Vérifier si les données géographiques sont chargées ===
+    if df_geo is None or df_geo.empty:
+        st.error(
+            "Les données géographiques de référence (communes, départements...) n'ont pas pu être chargées. Le module de recherche est indisponible.")
+        return pd.DataFrame()
+
+    # =================================================================
+    # ## 1. Saisie des noms d'établissements
+    # =================================================================
+    noms_etablissements_osm = st.text_input(
+        "1️⃣ Entrez un ou plusieurs noms d'établissements (séparés par des virgules)",
+        placeholder="Ex: Carrefour, Lidl, Auchan",
+        value=st.session_state.get("noms_etablissements_osm", ""),
+        help="Vous pouvez rechercher plusieurs enseignes en même temps."
+    )
+    noms_etablissements = [nom.strip() for nom in noms_etablissements_osm.split(",") if nom.strip()]
+
+    # =================================================================
+    # ## 2. Sélection de la zone géographique
+    # =================================================================
+    st.markdown("2️⃣ Choisissez la zone de recherche")
+
+    maille_recherche = st.radio(
+        "Choisir la maille :",
+        ('Région', 'Département', 'Commune'),
+        horizontal=True,
+        key="maille_osm"
+    )
+
+    selection_geo = []  # Cette liste contiendra les noms de Régions, Départements ou Communes
+
+    # --- Logique d'affichage dynamique des sélecteurs ---
+
+    if maille_recherche == 'Région':
+        regions_disponibles = sorted(df_geo['Nom_Region'].unique())
+        selection_geo = st.multiselect("Choisissez une ou plusieurs régions", regions_disponibles,
+                                       key="selection_region_osm")
+
+    elif maille_recherche == 'Département':
+
+        # Convertir la colonne en string pour un tri sans erreur
+        df_geo['Num_Dep'] = df_geo['Num_Dep'].astype(str)
+
+        # Crée un DataFrame unique des départements, trié par numéro
+        df_deps = df_geo[['Num_Dep', 'Nom_Dep']].drop_duplicates().sort_values('Num_Dep')
+
+        # Crée les étiquettes formatées "Numéro - Nom" pour l'affichage
+        df_deps['label'] = df_deps['Num_Dep'].astype(str).str.zfill(2) + " - " + df_deps['Nom_Dep']
+        options_deps = df_deps['label'].tolist()
+
+        # Affiche le sélecteur avec les étiquettes triées
+        selection_labels = st.multiselect("Choisissez un ou plusieurs départements", options_deps,
+                                          key="selection_dep_osm")
+
+        # Traduit les étiquettes sélectionnées (ex: "01 - Ain") en vrais noms (ex: "Ain") pour le filtrage
+        selection_geo = df_deps[df_deps['label'].isin(selection_labels)]['Nom_Dep'].tolist()
+
+    elif maille_recherche == 'Commune':
+        # Pour les communes, on filtre d'abord par département pour une meilleure UX
+        st.info("Pour trouver une commune, veuillez d'abord sélectionner son département.")
+
+        df_deps = df_geo[['Num_Dep', 'Nom_Dep']].drop_duplicates().sort_values('Num_Dep')
+        df_deps['label'] = df_deps['Num_Dep'].astype(str).str.zfill(2) + " - " + df_deps['Nom_Dep']
+        options_deps = df_deps['label'].tolist()
+
+        dep_pour_communes_labels = st.multiselect("D'abord, sélectionnez le(s) département(s)", options_deps,
+                                                  key="dep_pour_commune_osm")
+
+        if dep_pour_communes_labels:
+            # Traduit les labels en noms de départements
+            deps_selectionnes = df_deps[df_deps['label'].isin(dep_pour_communes_labels)]['Nom_Dep'].tolist()
+
+            # Filtre les communes sur la base des départements choisis
+            communes_disponibles = sorted(df_geo[df_geo['Nom_Dep'].isin(deps_selectionnes)]['Nom_Ville'].unique())
+            selection_geo = st.multiselect("Puis, choisissez une ou plusieurs communes", communes_disponibles,
+                                           key="selection_commune_osm")
+
+    # =================================================================
+    # ## 3. Bouton de recherche et exécution
+    # =================================================================
+    if st.button("Lancer la recherche", key="recherche_osm_nouveau", type="primary"):
+        # Sauvegarde de l'input utilisateur
+        st.session_state["noms_etablissements_osm"] = noms_etablissements_osm
+
+        villes_a_chercher = []
+        if selection_geo:
+            if maille_recherche == 'Région':
+                villes_a_chercher = df_geo[df_geo['Nom_Region'].isin(selection_geo)]['Nom_Ville'].tolist()
+            elif maille_recherche == 'Département':
+                villes_a_chercher = df_geo[df_geo['Nom_Dep'].isin(selection_geo)]['Nom_Ville'].tolist()
+            elif maille_recherche == 'Commune':
+                villes_a_chercher = selection_geo  # C'est déjà la liste des communes
+
+        # Lancement de la requête API seulement si les inputs sont valides
+        if noms_etablissements and villes_a_chercher:
+            with st.spinner(
+                    f"Recherche de '{', '.join(noms_etablissements)}' sur {len(villes_a_chercher)} commune(s)..."):
+                df_resultats = recherche_etablissements_osm(noms_etablissements, villes_a_chercher)
+
+            # Stockage des résultats dans la session
+            st.session_state["df_etablissements_osm"] = df_resultats if df_resultats is not None else pd.DataFrame()
+        else:
+            st.warning("Veuillez entrer au moins un nom d’établissement ET sélectionner une zone géographique.")
+            # On vide les résultats si la recherche est invalide
+            st.session_state["df_etablissements_osm"] = pd.DataFrame()
+
+    # =================================================================
+    # ## 4. Valeur de retour
+    # =================================================================
+    # La fonction retourne toujours l'état actuel des résultats stockés en session
+    return st.session_state.get("df_etablissements_osm", pd.DataFrame())
+
+# Affichage des cartes points OSM
 def affichage_carte_points_osm(data, lat_centre, lon_centre):
     if lat_centre is None or lon_centre is None:
         st.warning("Veuillez sélectionner une zone pour afficher la carte.")
@@ -464,8 +629,7 @@ def affichage_carte_points_osm(data, lat_centre, lon_centre):
                 unsafe_allow_html=True
             )
 
-
-# Affichage de la carte avec cercles OSM (INCHANGÉE)
+# Affichage de la carte avec cercles OSM
 def affichage_carte_cercles_osm(data, lat_centre, lon_centre):
     if lat_centre is None or lon_centre is None:
         st.warning("Veuillez sélectionner une zone pour afficher la carte.")
@@ -524,8 +688,7 @@ def affichage_carte_cercles_osm(data, lat_centre, lon_centre):
                 unsafe_allow_html=True
             )
 
-
-# Affichage Isochrones OSM (fonction créée précédemment, INCHANGÉE)
+# Affichage Isochrones OSM
 def affichage_isochrones_osm(data, lat_centre, lon_centre):
     if lat_centre is None or lon_centre is None:
         st.warning("Veuillez sélectionner une zone pour afficher la carte.")
@@ -535,7 +698,7 @@ def affichage_isochrones_osm(data, lat_centre, lon_centre):
         return
     temps_trajet_minutes = st.slider(
         "Temps de trajet pour l'isochrone (en minutes)",
-        min_value=5, max_value=30, value=15, step=5,
+        min_value=1, max_value=30, value=5, step=1,
         key="slider_isochrones_osm"
     )
     temps_trajet_secondes = temps_trajet_minutes * 60
@@ -641,7 +804,6 @@ def affichage_isochrones_osm(data, lat_centre, lon_centre):
                 f'<span style="font-size:20px;">{nom_leg}</span>',
                 unsafe_allow_html=True
             )
-
 
 # Choix du type de carte OSM (fonction créée précédemment, INCHANGÉE)
 def choix_carte_osm(data, lat_centre, lon_centre):
