@@ -1,6 +1,4 @@
-# =======================
-# 📦 Imports & Librairies
-# =======================
+# Librairies
 import streamlit as st
 
 # Page d'acceuil

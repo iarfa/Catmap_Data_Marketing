@@ -2,7 +2,10 @@
 # 📦 Imports & Librairies
 # =======================
 import streamlit as st
-from fonctions_basiques import extraction_adresse_OSM, choix_centre_OSM
+from fonctions_basiques import (
+    extraction_adresse_OSM,
+    choix_centre_OSM,
+    charger_communes)
 from fonctions_cartographie import (
     interface_recherche_osm,
     transfo_geodataframe,
@@ -10,14 +13,22 @@ from fonctions_cartographie import (
 )
 
 # Page OSM
-def page_osm():
+def page_osm(path_communes):
     """
     Page dédiée à l'affichage des cartes OSM.
     """
     st.header("🗺️ Analyse via OpenStreetMap")
 
+    # Appel de la fonction de chargement spécifique
+    df_communes = charger_communes(path_communes)
+
+    # Si le chargement des communes échoue, on ne peut rien faire
+    if df_communes.empty:
+        st.warning("Chargement des données géographiques échoué. Impossible d'afficher la recherche.")
+        return # Stop
+
     # Appel unique de la recherche (gère automatiquement session_state)
-    df_etablissements_osm = interface_recherche_osm()
+    df_etablissements_osm = interface_recherche_osm(df_communes)
 
     if df_etablissements_osm is not None and not df_etablissements_osm.empty:
 

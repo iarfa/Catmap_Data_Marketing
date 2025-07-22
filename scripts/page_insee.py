@@ -3,7 +3,8 @@
 # =======================
 import streamlit as st
 from fonctions_basiques import (
-    chargement_donnees,
+    charger_etablissements,
+    charger_centres_departements,
     apercu_donnees,
     filtrer_donnees,
     choix_centre_departement
@@ -16,7 +17,7 @@ from fonctions_cartographie import (
 # =======================
 # 📄 Fonction principale de la page INSEE
 # =======================
-def page_insee():
+def page_insee(path_etablissement, path_centres_departements):
     """
     Objectif :
         Page dédiée aux données INSEE : aperçu, filtrage, carte.
@@ -30,13 +31,13 @@ def page_insee():
     # =======================
 
     # Chemins
-    path_etablissement = "../data/Fichier_final_etablissements_commerces_alimentaire_non_alimentaire.parquet"
-    path_centres_departements = "../data/Centres_departements.xlsx"
+    df_etablissements = charger_etablissements(path_etablissement)
+    df_centres_dep = charger_centres_departements(path_centres_departements)
 
     # Chargement des données
-    df_etablissements, df_centres_dep = chargement_donnees(
-        path_etablissement, path_centres_departements
-    )
+    if df_etablissements.empty or df_centres_dep.empty:
+        st.warning("Chargement des données échoué. Impossible d'afficher la page.")
+        return
 
     # =======================
     # 👁️ Aperçu des données
