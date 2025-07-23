@@ -7,6 +7,7 @@ import pandas as pd
 import requests
 import json
 import streamlit as st
+import branca.colormap as cm
 from streamlit_folium import st_folium
 
 # ==============================================
@@ -365,7 +366,6 @@ def recherche_etablissements_osm(noms_etablissements, villes, max_etablissements
         st.success(f"{len(df)} établissements trouvés.")
     return df
 
-
 # Affichage des cartes points OSM
 def affichage_carte_points_osm(data, lat_centre, lon_centre):
     if lat_centre is None or lon_centre is None:
@@ -588,34 +588,72 @@ def affichage_isochrones_osm(data, lat_centre, lon_centre):
                 unsafe_allow_html=True
             )
 
-# Choix du type de carte OSM (fonction créée précédemment, INCHANGÉE)
-def choix_carte_osm(data, lat_centre, lon_centre):
-    if lat_centre is None or lon_centre is None:
-        st.warning("Veuillez sélectionner une ville pour centrer la carte avant de choisir un type d'affichage.")
-    if "affichage_mode_osm" not in st.session_state:
-        st.session_state["affichage_mode_osm"] = "points"
-    st.subheader("Choisissez un type d'affichage pour la carte des établissements OSM :")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Points Simples", key="btn_osm_points"):
-            st.session_state["affichage_mode_osm"] = "points"
-    with col2:
-        if st.button("Cercles d'influence", key="btn_osm_cercles"):
-            st.session_state["affichage_mode_osm"] = "cercles"
-    with col3:
-        if st.button("Isochrones", key="btn_osm_isochrones"):
-            st.session_state["affichage_mode_osm"] = "isochrones"
-    if data is None or data.empty:
-        if st.session_state.get("df_etablissements_osm") is not None:
-            st.info(
-                "Aucun établissement trouvé pour les critères de recherche actuels. Modifiez votre recherche pour afficher une carte.")
-        return
-    if lat_centre is None or lon_centre is None:
-        st.warning("Le centre de la carte n'est pas défini. Veuillez sélectionner une ville.")
-        return
-    if st.session_state["affichage_mode_osm"] == "points":
-        affichage_carte_points_osm(data, lat_centre, lon_centre)
-    elif st.session_state["affichage_mode_osm"] == "cercles":
-        affichage_carte_cercles_osm(data, lat_centre, lon_centre)
-    elif st.session_state["affichage_mode_osm"] == "isochrones":
-        affichage_isochrones_osm(data, lat_centre, lon_centre)
+# Carte enrichie de données socio-économiques
+def creer_carte_enrichie(gdf_etablissements, lat_centre, lon_centre,
+                         gdf_socio=None, colonne_socio=None, nom_indicateur_socio=None):
+    """
+    Crée un objet carte Folium multi-couches. La légende socio-économique est DANS la carte.
+    Retourne la carte et le dictionnaire de couleurs pour la légende des enseignes.
+    """
+    # 1. Création de la carte de base
+    m = folium.Map(location=[lat_centre, lon_centre], zoom_start=11, tiles="OpenStreetMap")
+
+    # Initialisation
+    type_to_color = {}
+
+    # 2. Couche Socio-économique (dessinée en premier)
+    if gdf_socio is not None and not gdf_socio.empty and colonne_socio is not None:
+        gdf_socio_clean = gdf_socio.dropna(subset=[colonne_socio]).copy()
+
+        if not gdf_socio_clean.empty:
+            colormap = None
+            if gdf_socio_clean[colonne_socio].nunique() > 1:
+                min_val, max_val = gdf_socio_clean[colonne_socio].min(), gdf_socio_clean[colonne_socio].max()
+                colormap = cm.LinearColormap(colors=['#ffffcc', '#fd8d3c', '#800026'], vmin=min_val, vmax=max_val)
+                colormap.caption = f"{nom_indicateur_socio or colonne_socio}"
+                # On ajoute la légende directement à la carte
+                colormap.add_to(m)
+
+            def style_function(feature):
+                value = feature['properties'][colonne_socio]
+                if value is None: return {'fillOpacity': 0, 'color': 'none'}
+                if colormap:
+                    return {'fillColor': colormap(value), 'color': 'black', 'weight': 1, 'fillOpacity': 0.6}
+                else:
+                    return {'fillColor': '#800026', 'color': 'black', 'weight': 1, 'fillOpacity': 0.6}
+
+            cle_geo = next((col for col in ['CODE_DEPT', 'CODE_COM', 'IRIS'] if col in gdf_socio_clean.columns), None)
+            if 'NOM_COM' in gdf_socio_clean.columns and cle_geo in ['CODE_DEPT', 'CODE_COM']:
+                gdf_socio_clean['tooltip_label'] = gdf_socio_clean[cle_geo] + ' - ' + gdf_socio_clean['NOM_COM']
+            else:
+                gdf_socio_clean['tooltip_label'] = gdf_socio_clean[cle_geo]
+
+            folium.GeoJson(
+                gdf_socio_clean, name=nom_indicateur_socio or "Données Socio-Éco",
+                style_function=style_function, interactive=True,
+                tooltip=folium.features.GeoJsonTooltip(fields=['tooltip_label', colonne_socio],
+                                                       aliases=["Zone:", f"{nom_indicateur_socio}:"], localize=True,
+                                                       sticky=False)
+            ).add_to(m)
+
+    # 3. Couche des Établissements (dessinée en dernier)
+    if gdf_etablissements is not None and not gdf_etablissements.empty:
+        fg_etablissements = folium.FeatureGroup(name="Établissements Concurrents", show=True)
+        couleurs = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628', '#f781bf']
+        enseignes_uniques = gdf_etablissements['nom_etablissement'].unique()
+        type_to_color = {nom: couleurs[i % len(couleurs)] for i, nom in enumerate(enseignes_uniques)}
+        for _, row in gdf_etablissements.iterrows():
+            popup_html = f"<b>Nom entreprise :</b> {row.get('nom_etablissement', 'N/A')}<br><b>Adresse :</b> {row.get('adresse_simplifiee', 'N/A')}<br><b>Précision :</b> {row.get('precision_geocodage', 'N/A')}"
+            folium.CircleMarker(
+                location=[row.geometry.y, row.geometry.x], radius=6,
+                color=type_to_color.get(row['nom_etablissement'], 'gray'),
+                fill=True, fill_color=type_to_color.get(row['nom_etablissement'], 'gray'), fill_opacity=0.9,
+                popup=folium.Popup(popup_html, max_width=300), tooltip=row['nom_etablissement']
+            ).add_to(fg_etablissements)
+        fg_etablissements.add_to(m)
+
+    # 4. Contrôleur de couches
+    folium.LayerControl().add_to(m)
+
+    # La fonction retourne la carte et le dictionnaire de couleurs pour la légende des enseignes
+    return m, type_to_color

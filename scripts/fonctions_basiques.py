@@ -4,6 +4,7 @@
 import pandas as pd
 import streamlit as st
 import numpy as np
+import geopandas as gpd
 
 # ==============================================
 # Section chargement des données
@@ -43,6 +44,15 @@ def charger_communes(path_communes):
     except FileNotFoundError:
         st.error(f"Fichier des communes introuvable : {path_communes}")
         return pd.DataFrame()
+
+@st.cache_data
+def charger_donnees_iris_socio(path_iris_socio):
+    """Charge le GeoDataFrame des données IRIS depuis un fichier Parquet."""
+    try:
+        return gpd.read_parquet(path_iris_socio)
+    except FileNotFoundError:
+        st.error(f"Fichier de données socio-économiques introuvable au chemin : {path_iris_socio}")
+        return None
 
 # Aperçu des données
 def apercu_donnees(data, nb_lignes):
@@ -192,18 +202,14 @@ def choix_centre_OSM(data):
     return lat_centre, lon_centre
 
 # Préparation des données socio-économiques
-def preparer_donnees_socio(df_iris_base):
+def preparer_donnees_socio(df_iris_base, df_communes_france):
     """
-    Nettoie, enrichit (avec des proportions claires) et prépare les données socio-économiques
-    pour les 3 niveaux d'analyse : IRIS, Commune, et Département.
+    Nettoie, enrichit et prépare les données socio-économiques pour les 3 niveaux
+    d'analyse : IRIS, Commune, et Département.
     """
     df = df_iris_base.copy()
 
-    # =================================================================
-    # Étape 1 : Configuration centralisée des colonnes
-    # =================================================================
-    # Si vous ajoutez une colonne, vous n'aurez qu'à la modifier ici.
-
+    # --- Étape 1 : Configuration centralisée ---
     COLS_COMPTAGE = [
         'Nb_menages_total', 'Pop_15_24_ans', 'Pop_25_54_ans', 'Pop_55_79_ans', 'Pop_80_ans_plus',
         'Nb_menages_sans_famille', 'Nb_menages_famille', 'Menages_couple_sans_enfant',
@@ -212,15 +218,10 @@ def preparer_donnees_socio(df_iris_base):
         'Menages_prof_intermediaires_CS4', 'Menages_employes_CS5', 'Menages_ouvriers_CS6',
         'Menages_retraites_CS7', 'Menages_autres_sans_act_pro_CS8'
     ]
-
-    # Dictionnaires pour générer les proportions dynamiquement
     PROPORTIONS_POPULATION = {
-        'Part_jeunes_15_24_ans_pct': 'Pop_15_24_ans',
-        'Part_actifs_25_54_ans_pct': 'Pop_25_54_ans',
-        'Part_seniors_55_79_ans_pct': 'Pop_55_79_ans',  # Nom plus clair que "actifs"
-        'Part_seniors_80_ans_plus_pct': 'Pop_80_ans_plus'
+        'Part_jeunes_15_24_ans_pct': 'Pop_15_24_ans', 'Part_actifs_25_54_ans_pct': 'Pop_25_54_ans',
+        'Part_seniors_55_79_ans_pct': 'Pop_55_79_ans', 'Part_seniors_80_ans_plus_pct': 'Pop_80_ans_plus'
     }
-
     PROPORTIONS_MENAGES = {
         'Part_menages_monoparentaux_pct': 'Menages_monoparental',
         'Part_agriculteurs_CS1_pct': 'Menages_agriculteurs_CS1',
@@ -228,14 +229,11 @@ def preparer_donnees_socio(df_iris_base):
         'Part_cadres_CS3_pct': 'Menages_cadres_prof_intelectuelles_CS3',
         'Part_prof_intermediaires_CS4_pct': 'Menages_prof_intermediaires_CS4',
         'Part_employes_CS5_pct': 'Menages_employes_CS5',
-        'Part_ouvriers_CS6_pct': 'Menages_ouvriers_CS6',
-        'Part_retraites_CS7_pct': 'Menages_retraites_CS7',
+        'Part_ouvriers_CS6_pct': 'Menages_ouvriers_CS6', 'Part_retraites_CS7_pct': 'Menages_retraites_CS7',
         'Part_autres_CS8_pct': 'Menages_autres_sans_act_pro_CS8'
     }
 
-    # =================================================================
-    # Étape 2 : Nettoyage et Ingénierie de variables (dynamique)
-    # =================================================================
+    # --- Étape 2 : Nettoyage et Ingénierie de variables ---
     for col in COLS_COMPTAGE:
         if col in df.columns:
             df[col] = df[col].fillna(0).round(0).astype(int)
@@ -246,41 +244,39 @@ def preparer_donnees_socio(df_iris_base):
 
     for new_col, source_col in PROPORTIONS_POPULATION.items():
         df[new_col] = (df[source_col] / pop_total_safe * 100).fillna(0)
-
     for new_col, source_col in PROPORTIONS_MENAGES.items():
         df[new_col] = (df[source_col] / menages_total_safe * 100).fillna(0)
 
-    # =================================================================
-    # Étape 3 : Agrégation aux mailles Commune et Département
-    # =================================================================
+    # --- Étape 3 : Agrégation ---
     df['CODE_COM'] = df['IRIS'].str.slice(0, 5)
     df['CODE_DEPT'] = df['IRIS'].str.slice(0, 2)
 
     agg_funcs = {
         'NOM_COM': 'first', 'Taux_pauvrete': 'mean', 'Revenu_median': 'mean',
-        'Population_totale': 'sum',
-        **{col: 'sum' for col in COLS_COMPTAGE}
+        'Population_totale': 'sum', **{col: 'sum' for col in COLS_COMPTAGE}
     }
 
     df_commune = df.dissolve(by='CODE_COM', aggfunc=agg_funcs, as_index=False)
     df_commune['CODE_DEPT'] = df_commune['CODE_COM'].str.slice(0, 2)
     df_departement = df_commune.dissolve(by='CODE_DEPT', aggfunc=agg_funcs, as_index=False)
 
-    # =================================================================
-    # Étape 4 : Recalcul des proportions pour les mailles agrégées
-    # =================================================================
+    # --- Étape 4 : Correction des noms de département ---
+    df_ref_deps = df_communes_france[['Num_Dep', 'Nom_Dep']].drop_duplicates()
+    df_ref_deps['Num_Dep'] = df_ref_deps['Num_Dep'].astype(str).str.zfill(2)
+    df_departement = df_departement.merge(df_ref_deps, left_on='CODE_DEPT', right_on='Num_Dep', how='left')
+    df_departement['NOM_COM'] = df_departement['Nom_Dep']
+    df_departement.drop(columns=['Num_Dep', 'Nom_Dep'], inplace=True)
+
+    # --- Étape 5 : Recalcul et formatage final pour les mailles agrégées ---
     for dframe in [df_commune, df_departement]:
         pop_total_safe = dframe['Population_totale'].replace(0, np.nan)
         menages_total_safe = dframe['Nb_menages_total'].replace(0, np.nan)
-
         for new_col, source_col in PROPORTIONS_POPULATION.items():
             dframe[new_col] = (dframe[source_col] / pop_total_safe * 100).fillna(0)
-
         for new_col, source_col in PROPORTIONS_MENAGES.items():
             dframe[new_col] = (dframe[source_col] / menages_total_safe * 100).fillna(0)
 
-    return {
-        "IRIS": df,
-        "Commune": df_commune,
-        "Département": df_departement
-    }
+        if 'Revenu_median' in dframe.columns:
+            dframe['Revenu_median'] = dframe['Revenu_median'].fillna(0).round(0).astype(int)
+
+    return {"IRIS": df, "Commune": df_commune, "Département": df_departement}
