@@ -303,58 +303,106 @@ INDICATEURS_CONFIG = {
 }
 
 # Interface de sélection socio
+def interface_recherche_osm(df_geo):
+    """
+    Affiche l'interface de recherche d'établissements OSM avec un tri corrigé.
+    """
+    st.subheader("1. Recherche d'établissements")
+    noms_etablissements_osm = st.text_input(
+        "Noms d'établissements (séparés par des virgules)",
+        placeholder="Ex: Carrefour, Lidl",
+        value=st.session_state.get("noms_etablissements_osm", "")
+    )
+    noms_etablissements = [nom.strip() for nom in noms_etablissements_osm.split(",") if nom.strip()]
+
+    st.markdown("Zone de recherche")
+    maille_recherche = st.radio(
+        "Choisir la maille :", ('Région', 'Département', 'Commune'),
+        horizontal=True, key="maille_osm"
+    )
+    selection_geo = []
+
+    if maille_recherche == 'Région':
+        regions_disponibles = sorted(df_geo['Nom_Region'].unique())
+        selection_geo = st.multiselect("Choisissez une ou plusieurs régions", regions_disponibles)
+
+    elif maille_recherche == 'Département':
+        df_deps = df_geo[['Num_Dep', 'Nom_Dep']].drop_duplicates().sort_values('Num_Dep')
+        df_deps['label'] = df_deps['Num_Dep'].astype(str).str.zfill(2) + " - " + df_deps['Nom_Dep']
+        options_deps = df_deps['label'].tolist()
+        selection_labels = st.multiselect("Choisissez un ou plusieurs départements", options_deps)
+        selection_geo = df_deps[df_deps['label'].isin(selection_labels)]['Nom_Dep'].tolist()
+
+    elif maille_recherche == 'Commune':
+        df_deps = df_geo[['Num_Dep', 'Nom_Dep']].drop_duplicates().sort_values('Num_Dep')
+        df_deps['label'] = df_deps['Num_Dep'].astype(str).str.zfill(2) + " - " + df_deps['Nom_Dep']
+        options_deps = df_deps['label'].tolist()
+        dep_pour_communes_labels = st.multiselect("D'abord, sélectionnez un ou plusieurs départements", options_deps)
+        if dep_pour_communes_labels:
+            deps_selectionnes = df_deps[df_deps['label'].isin(dep_pour_communes_labels)]['Nom_Dep'].tolist()
+            communes_disponibles = sorted(df_geo[df_geo['Nom_Dep'].isin(deps_selectionnes)]['Nom_Ville'].unique())
+            selection_geo = st.multiselect("Puis, choisissez une ou plusieurs communes", communes_disponibles)
+
+    if st.button("Lancer la recherche", key="recherche_osm_nouveau", type="primary"):
+        st.session_state["noms_etablissements_osm"] = noms_etablissements_osm
+        villes_a_chercher = []
+        if selection_geo:
+            if maille_recherche == 'Région':
+                villes_a_chercher = df_geo[df_geo['Nom_Region'].isin(selection_geo)]['Nom_Ville'].tolist()
+            elif maille_recherche == 'Département':
+                villes_a_chercher = df_geo[df_geo['Nom_Dep'].isin(selection_geo)]['Nom_Ville'].tolist()
+            elif maille_recherche == 'Commune':
+                villes_a_chercher = selection_geo
+        if noms_etablissements and villes_a_chercher:
+            with st.spinner(f"Recherche en cours..."):
+                df_resultats = recherche_etablissements_osm(noms_etablissements, villes_a_chercher)
+            st.session_state["df_etablissements_osm"] = df_resultats if df_resultats is not None else pd.DataFrame()
+        else:
+            st.warning("Veuillez entrer un nom d’établissement ET sélectionner une zone.")
+
+    return st.session_state.get("df_etablissements_osm", pd.DataFrame())
+
+
 def interface_selection_socio(dict_geodatas):
     """
-    Affiche l'interface de sélection et retourne les données, la colonne,
-    le nom de l'indicateur et la maille choisis.
+    Affiche l'interface de sélection socio-économique dans la sidebar
+    et retourne les données déjà filtrées par département.
     """
-    gdf_a_afficher = None
-    colonne_a_afficher = None
-    nom_indicateur_final = None
-    maille_choisie = None  # On ajoute cette variable
+    gdf_socio_filtre, colonne_a_afficher, nom_indicateur_final, maille_choisie = None, None, None, None
 
-    st.sidebar.subheader("📊 Analyse Socio-Économique")
-
+    st.sidebar.subheader("📊 Analyse du Territoire")
     if st.sidebar.toggle("Enrichir avec des données de territoire"):
 
-        nom_affiche_choisi = st.sidebar.selectbox(
-            "Choisissez un indicateur :",
-            [v['display'] for v in INDICATEURS_CONFIG.values()]
-        )
-
+        nom_affiche_choisi = st.sidebar.selectbox("Choisissez un indicateur :",
+                                                  [v['display'] for v in INDICATEURS_CONFIG.values()])
         config_choisie = next(c for c in INDICATEURS_CONFIG.values() if c['display'] == nom_affiche_choisi)
-        colonne_a_afficher = config_choisie['raw']
-        nom_indicateur_final = config_choisie['display']
+        colonne_a_afficher, nom_indicateur_final = config_choisie['raw'], config_choisie['display']
 
         if config_choisie['pct'] is not None:
-            type_affichage = st.sidebar.radio(
-                "Afficher en :",
-                ("Valeur absolue", "Pourcentage (%)"),
-                horizontal=True,
-                key=f"radio_{config_choisie['raw']}"
-            )
+            type_affichage = st.sidebar.radio("Afficher en :", ("Valeur absolue", "Pourcentage (%)"), horizontal=True)
             if type_affichage == "Pourcentage (%)":
-                colonne_a_afficher = config_choisie['pct']
-                nom_indicateur_final = f"{config_choisie['display']} (%)"
+                colonne_a_afficher, nom_indicateur_final = config_choisie['pct'], f"{config_choisie['display']} (%)"
 
-        if colonne_a_afficher in ['Revenu_median', 'Taux_pauvrete']:
-            maille_disponible = ['Commune', 'Département']
-            st.sidebar.info(f"Cet indicateur est affiché à la maille Commune ou Département.")
-            index_defaut = 0
-        else:
-            maille_disponible = ['IRIS', 'Commune', 'Département']
-            index_defaut = 1
-
-        # On stocke la maille choisie
-        maille_choisie = st.sidebar.radio(
-            "Niveau d'analyse :",
-            maille_disponible,
-            index=index_defaut,
-            horizontal=True,
-            key=f"radio_maille_{config_choisie['raw']}"
-        )
+        maille_disponible = ['Commune', 'Département'] if colonne_a_afficher in ['Revenu_median',
+                                                                                 'Taux_pauvrete'] else ['IRIS',
+                                                                                                        'Commune',
+                                                                                                        'Département']
+        index_defaut = 0 if len(maille_disponible) == 2 else 1
+        maille_choisie = st.sidebar.radio("Niveau d'analyse :", maille_disponible, index=index_defaut, horizontal=True)
 
         gdf_a_afficher = dict_geodatas[maille_choisie]
 
-    # On retourne maintenant 4 valeurs
-    return gdf_a_afficher, colonne_a_afficher, nom_indicateur_final, maille_choisie
+        df_deps = dict_geodatas['Département']
+        if 'label' not in df_deps.columns:
+            df_deps['label'] = df_deps['CODE_DEPT'] + ' - ' + df_deps['NOM_COM']
+
+        deps_selectionnes = st.sidebar.multiselect("Filtrer sur un ou plusieurs départements :",
+                                                   options=df_deps['label'])
+
+        if deps_selectionnes:
+            codes_deps = [d.split(' - ')[0] for d in deps_selectionnes]
+            gdf_socio_filtre = gdf_a_afficher[gdf_a_afficher['CODE_DEPT'].isin(codes_deps)]
+        else:
+            st.sidebar.info("Sélectionnez au moins un département pour afficher les données sur la carte.")
+
+    return gdf_socio_filtre, colonne_a_afficher, nom_indicateur_final, maille_choisie

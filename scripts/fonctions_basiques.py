@@ -204,12 +204,14 @@ def choix_centre_OSM(data):
 # Préparation des données socio-économiques
 def preparer_donnees_socio(df_iris_base, df_communes_france):
     """
-    Nettoie, enrichit et prépare les données socio-économiques pour les 3 niveaux
-    d'analyse : IRIS, Commune, et Département.
+    Nettoie, enrichit et prépare les données socio-économiques pour les 3 niveaux d'analyse,
+    en conservant les NaN pour les indicateurs pertinents.
     """
     df = df_iris_base.copy()
 
-    # --- Étape 1 : Configuration centralisée ---
+    df_ref_deps = df_communes_france[['Num_Dep', 'Nom_Dep']].drop_duplicates()
+    df_ref_deps['Num_Dep'] = df_ref_deps['Num_Dep'].astype(str).str.zfill(2)
+
     COLS_COMPTAGE = [
         'Nb_menages_total', 'Pop_15_24_ans', 'Pop_25_54_ans', 'Pop_55_79_ans', 'Pop_80_ans_plus',
         'Nb_menages_sans_famille', 'Nb_menages_famille', 'Menages_couple_sans_enfant',
@@ -233,50 +235,56 @@ def preparer_donnees_socio(df_iris_base, df_communes_france):
         'Part_autres_CS8_pct': 'Menages_autres_sans_act_pro_CS8'
     }
 
-    # --- Étape 2 : Nettoyage et Ingénierie de variables ---
+    # Nettoyage des colonnes de comptage (un NaN ici signifie bien 0)
     for col in COLS_COMPTAGE:
         if col in df.columns:
             df[col] = df[col].fillna(0).round(0).astype(int)
 
+    # Ingénierie de variables
     df['Population_totale'] = df[list(PROPORTIONS_POPULATION.values())].sum(axis=1)
     pop_total_safe = df['Population_totale'].replace(0, np.nan)
     menages_total_safe = df['Nb_menages_total'].replace(0, np.nan)
 
+    # On ne remplit PAS les NaN par 0 pour garder le sens de "donnée non disponible"
     for new_col, source_col in PROPORTIONS_POPULATION.items():
-        df[new_col] = (df[source_col] / pop_total_safe * 100).fillna(0)
+        df[new_col] = (df[source_col] / pop_total_safe * 100)
     for new_col, source_col in PROPORTIONS_MENAGES.items():
-        df[new_col] = (df[source_col] / menages_total_safe * 100).fillna(0)
+        df[new_col] = (df[source_col] / menages_total_safe * 100)
 
-    # --- Étape 3 : Agrégation ---
+    # Agrégation et jointure
     df['CODE_COM'] = df['IRIS'].str.slice(0, 5)
     df['CODE_DEPT'] = df['IRIS'].str.slice(0, 2)
+    df = df.merge(df_ref_deps, left_on='CODE_DEPT', right_on='Num_Dep', how='left')
+    df.drop(columns=['Num_Dep'], inplace=True, errors='ignore')
 
     agg_funcs = {
-        'NOM_COM': 'first', 'Taux_pauvrete': 'mean', 'Revenu_median': 'mean',
+        'NOM_COM': 'first', 'Nom_Dep': 'first', 'Taux_pauvrete': 'mean', 'Revenu_median': 'mean',
         'Population_totale': 'sum', **{col: 'sum' for col in COLS_COMPTAGE}
     }
 
     df_commune = df.dissolve(by='CODE_COM', aggfunc=agg_funcs, as_index=False)
     df_commune['CODE_DEPT'] = df_commune['CODE_COM'].str.slice(0, 2)
     df_departement = df_commune.dissolve(by='CODE_DEPT', aggfunc=agg_funcs, as_index=False)
-
-    # --- Étape 4 : Correction des noms de département ---
-    df_ref_deps = df_communes_france[['Num_Dep', 'Nom_Dep']].drop_duplicates()
-    df_ref_deps['Num_Dep'] = df_ref_deps['Num_Dep'].astype(str).str.zfill(2)
-    df_departement = df_departement.merge(df_ref_deps, left_on='CODE_DEPT', right_on='Num_Dep', how='left')
     df_departement['NOM_COM'] = df_departement['Nom_Dep']
-    df_departement.drop(columns=['Num_Dep', 'Nom_Dep'], inplace=True)
 
-    # --- Étape 5 : Recalcul et formatage final pour les mailles agrégées ---
+    # Recalcul et formatage final
     for dframe in [df_commune, df_departement]:
         pop_total_safe = dframe['Population_totale'].replace(0, np.nan)
         menages_total_safe = dframe['Nb_menages_total'].replace(0, np.nan)
         for new_col, source_col in PROPORTIONS_POPULATION.items():
-            dframe[new_col] = (dframe[source_col] / pop_total_safe * 100).fillna(0)
+            dframe[new_col] = (dframe[source_col] / pop_total_safe * 100)
         for new_col, source_col in PROPORTIONS_MENAGES.items():
-            dframe[new_col] = (dframe[source_col] / menages_total_safe * 100).fillna(0)
+            dframe[new_col] = (dframe[source_col] / menages_total_safe * 100)
 
+        # On arrondit sans remplir les NaN
         if 'Revenu_median' in dframe.columns:
-            dframe['Revenu_median'] = dframe['Revenu_median'].fillna(0).round(0).astype(int)
+            dframe['Revenu_median'] = dframe['Revenu_median'].round(0)
+        if 'Taux_pauvrete' in dframe.columns:
+            dframe['Taux_pauvrete'] = dframe['Taux_pauvrete'].round(1)
+
+        proportion_cols = list(PROPORTIONS_POPULATION.keys()) + list(PROPORTIONS_MENAGES.keys())
+        for col in proportion_cols:
+            if col in dframe.columns:
+                dframe[col] = dframe[col].round(1)
 
     return {"IRIS": df, "Commune": df_commune, "Département": df_departement}
