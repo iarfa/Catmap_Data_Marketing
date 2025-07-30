@@ -10,42 +10,40 @@ import geopandas as gpd
 # Section chargement des données
 # ==============================================
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def charger_etablissements(path_etablissement):
     """Charge les données des établissements depuis un fichier Parquet."""
     try:
         return pd.read_parquet(path_etablissement)
     except FileNotFoundError:
         st.error(f"Fichier des établissements introuvable : {path_etablissement}")
-        return pd.DataFrame() # Retourne un dataframe vide en cas d'erreur
+        return pd.DataFrame()
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def charger_centres_departements(path_centres_dpt):
     """Charge les données des centres de départements depuis un fichier Excel."""
     try:
         return pd.read_excel(path_centres_dpt)
     except FileNotFoundError:
         st.error(f"Fichier des centres de départements introuvable : {path_centres_dpt}")
-        return pd.DataFrame() # Retourne un dataframe vide en cas d'erreur
+        return pd.DataFrame()
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def charger_communes(path_communes):
     """Charge les données des communes depuis un fichier Excel."""
     try:
         df = pd.read_excel(path_communes)
-
         if 'Num_Dep' in df.columns:
             df['Num_Dep'] = df['Num_Dep'].astype(str)
         else:
             st.error("La colonne 'Num_Dep' est manquante dans le fichier des communes.")
             return pd.DataFrame()
-
         return df
     except FileNotFoundError:
         st.error(f"Fichier des communes introuvable : {path_communes}")
         return pd.DataFrame()
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def charger_donnees_iris_socio(path_iris_socio):
     """Charge le GeoDataFrame des données IRIS depuis un fichier Parquet."""
     try:
@@ -54,7 +52,7 @@ def charger_donnees_iris_socio(path_iris_socio):
         st.error(f"Fichier de données socio-économiques introuvable au chemin : {path_iris_socio}")
         return None
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def charger_coefficients_trafic(path_coeff_trafic):
     """Charge la table des coefficients de trafic par ville."""
     try:
@@ -63,171 +61,76 @@ def charger_coefficients_trafic(path_coeff_trafic):
         st.warning(f"Fichier des coefficients de trafic introuvable : {path_coeff_trafic}. Le trafic ne sera pas simulé.")
         return pd.DataFrame(columns=['ville', 'coefficient'])
 
-# Aperçu des données
+# ==============================================
+# Fonctions pour la page INSEE (INCHANGÉES)
+# ==============================================
+
 def apercu_donnees(data, nb_lignes):
-    """
-    Objectif :
-        Charger un aperçu des données
-
-    Paramètres :
-        data : Fichier d'établissements
-        nb_lignes : Nombre de lignes à afficher
-
-    Sortie :
-        Aperçu du fichier
-    """
-
     st.markdown("<hr style='border:2px solid #ff7f0e;'>", unsafe_allow_html=True)
     st.header("📝 Aperçu des données")
     st.dataframe(data.head(nb_lignes))
     st.write(f"La table INSEE contient {data.shape[0]} lignes et {data.shape[1]} colonnes")
 
-# Filtre des données (INSEE)
 def filtrer_donnees(data):
-    """
-    Objectif :
-        Filtrer les données en fonction de la catégorie d'établissemnt et de la ville
-
-    Paramètres :
-        data : Fichier établissements
-
-    Sortie :
-        data_filtree : Fichier établissements filtré sur les catégories d'établissements et sur les villes
-    """
-
     st.markdown("## 🎯 Filtrage des données")
-
     liste_categories = sorted(list(data["Intitules_NAF_VF"].dropna().unique()))
-    choix_categories = st.multiselect(
-        "Choisissez une ou plusieurs catégorie(s)", liste_categories
-    )
-
+    choix_categories = st.multiselect("Choisissez une ou plusieurs catégorie(s)", liste_categories)
     liste_villes = sorted(list(data["libelleCommuneEtablissement"].dropna().unique()))
     choix_villes = st.multiselect("Choisissez une ou plusieurs ville(s)", liste_villes)
-
-    # Filtre des données
     data_filtree = data[
         (data["Intitules_NAF_VF"].isin(choix_categories))
         & (data["libelleCommuneEtablissement"].isin(choix_villes))
     ].reset_index(drop=True)
-
-    # Sortie
     return data_filtree
 
-# Choix du centre département
 def choix_centre_departement(data, centres_departements):
-    """
-    Objectif :
-        Centré la carte sur un département
-
-    Paramètres :
-        data : Fichier établissements
-        centres_departements : Fichier des départements avec leur centre associé
-
-    Sortie :
-        choix_dep : Département retenu par l'utilisateur
-        lat_centre : Latitude centrale du département retenu par l'utilisateur
-        lon_centre : Longitude centrale du département retenu par l'utilisateur
-    """
-
-    # Choix du département parmi la liste
     liste_deps = sorted(data["nom_dep"].dropna().unique())
-    choix_dep = st.selectbox(
-        "Choisissez le département au centre de la carte", liste_deps
-    )
-
-    # Filtre sur le choix du département
+    choix_dep = st.selectbox("Choisissez le département au centre de la carte", liste_deps)
     centre = centres_departements[centres_departements["Departement"] == choix_dep]
-
-    # Vérification que le filtre a renvoyé des résultats
     if centre.empty:
-        #st.error(f"Aucun centre trouvé pour le département {choix_dep}. Veuillez vérifier les données.")
-        return None, None, None  # Retourner None pour éviter l'erreur
-
-    # Extraction longitude et latitude
+        return None, None, None
     lat_centre = centre["Latitude_centre"].iloc[0]
     lon_centre = centre["Longitude_centre"].iloc[0]
-
-    # Affichage
     st.success(f"Centré sur {choix_dep} (lat: {lat_centre}, lon: {lon_centre})")
-
-    # Sortie
     return choix_dep, lat_centre, lon_centre
 
-# Extraire l'adresse et ajouter la précision de géocodage de la sortie API OSM
+# ==============================================
+# Fonctions pour la page OSM (OPTIMISÉES)
+# ==============================================
+
 def extraction_adresse_OSM(ligne_etab):
-    """
-    Objectif :
-        Extraire une adresse simplifiée et définir une précision de géocodage pour la sortie OSM
-
-    Paramètres :
-        ligne_etab : Une ligne du fichier
-
-    Sortie :
-        adresse_simplifiee : Nouvelle colonne contenant les adresses simplifiées
-        precision_geocodage : Précision géocodage (numéro ou voie)
-    """
-
-    # Séparation de l'adresse par ,
+    """Extrait une adresse simplifiée et définit une précision de géocodage pour la sortie OSM."""
     adresse_ini = ligne_etab["adresse"].split(", ")
-
-    # Extraction de l'adresse simplifiée (3 premières caractères si pas de numéro, 4 sinon)
     if adresse_ini[0].isdigit():
         adresse_simp = ", ".join(adresse_ini[:4])
         precision_geocodage = "numero"
     else:
         adresse_simp = ", ".join(adresse_ini[:3])
         precision_geocodage = "voie"
+    return pd.Series([adresse_simp, precision_geocodage])
 
-    return pd.Series([adresse_simp,precision_geocodage])
-
-# Choix du centre de département sur la sortie OSM
 def choix_centre_OSM(data):
-    """
-    Objectif :
-        Laisser à l'utilisateur de choisir le centre de la carte après sortie OSM
-
-    Paramètres :
-        data : Sortie dataframe OSM
-
-    Sortie :
-        lat_centre : Latitude centrale du département retenu par l'utilisateur
-        lon_centre : Longitude centrale du département retenu par l'utilisateur
-    """
-
-    # Transformation du dataframe et conservation de la première ligne comme centre de carte potentiel
+    """Laisse à l'utilisateur le choix de la ville pour centrer la carte."""
     centre_ville = data.groupby("ville").first().reset_index()[["ville", "latitude", "longitude"]]
-
-    # Selectionner une ville parmi la liste
     centre_ville_utilisateur = st.selectbox("Choisissez une ville pour le centre de votre carte", centre_ville["ville"])
-
-    # Recherche des coordonnées associées
     coordonnees_centre = centre_ville[centre_ville["ville"] == centre_ville_utilisateur]
-
-    # Extraction de la longitude et latitude
     lon_centre = coordonnees_centre["longitude"].iloc[0]
     lat_centre = coordonnees_centre["latitude"].iloc[0]
-
     return lat_centre, lon_centre
 
-# Préparation des données socio-économiques
-def preparer_donnees_socio(df_iris_base, df_communes_france):
+@st.cache_data(show_spinner=False)
+def preparer_donnees_socio(_df_iris_base, _df_communes_france):
     """
     Nettoie, enrichit, simplifie et prépare les données socio-économiques pour
-    les 3 niveaux d'analyse : IRIS, Commune, et Département.
+    les 3 niveaux d'analyse. Le résultat est mis en cache pour des performances optimales.
     """
-    df = df_iris_base.copy()
-
-    # --- AJOUT : Simplification des géométries pour la performance ---
-    # La tolérance est généralement en mètres si votre CRS est projeté (ex: Lambert-93).
-    # Une valeur plus élevée augmente la simplification et les performances.
+    df = _df_iris_base.copy()
     try:
         df['geometry'] = df['geometry'].simplify(tolerance=100, preserve_topology=True)
     except Exception as e:
         st.warning(f"Avertissement lors de la simplification des géométries : {e}")
 
-    # --- Étape 1 : Configuration centralisée (inchangée) ---
-    df_ref_deps = df_communes_france[['Num_Dep', 'Nom_Dep']].drop_duplicates()
+    df_ref_deps = _df_communes_france[['Num_Dep', 'Nom_Dep']].drop_duplicates()
     df_ref_deps['Num_Dep'] = df_ref_deps['Num_Dep'].astype(str).str.zfill(2)
 
     COLS_COMPTAGE = [
@@ -253,12 +156,11 @@ def preparer_donnees_socio(df_iris_base, df_communes_france):
         'Part_autres_CS8_pct': 'Menages_autres_sans_act_pro_CS8'
     }
 
-    # --- Étape 2 : Nettoyage et Ingénierie de variables (inchangée) ---
     for col in COLS_COMPTAGE:
         if col in df.columns:
             df[col] = df[col].fillna(0).round(0).astype(int)
 
-    df['Population_totale'] = df[list(PROPORTIONS_POPULATION.values())].sum(axis=1)
+    df['Population_totale'] = df[['Pop_15_24_ans', 'Pop_25_54_ans', 'Pop_55_79_ans', 'Pop_80_ans_plus']].sum(axis=1)
     pop_total_safe = df['Population_totale'].replace(0, np.nan)
     menages_total_safe = df['Nb_menages_total'].replace(0, np.nan)
 
@@ -267,10 +169,8 @@ def preparer_donnees_socio(df_iris_base, df_communes_france):
     for new_col, source_col in PROPORTIONS_MENAGES.items():
         df[new_col] = (df[source_col] / menages_total_safe * 100)
 
-    # --- Étape 3 : Agrégation (inchangée) ---
     df['CODE_COM'] = df['IRIS'].str.slice(0, 5)
     df['CODE_DEPT'] = df['IRIS'].str.slice(0, 2)
-
     df = df.merge(df_ref_deps, left_on='CODE_DEPT', right_on='Num_Dep', how='left')
     df.drop(columns=['Num_Dep'], inplace=True, errors='ignore')
 
@@ -284,7 +184,6 @@ def preparer_donnees_socio(df_iris_base, df_communes_france):
     df_departement = df_commune.dissolve(by='CODE_DEPT', aggfunc=agg_funcs, as_index=False)
     df_departement['NOM_COM'] = df_departement['Nom_Dep']
 
-    # --- Étape 4 : Recalcul et formatage final (inchangée) ---
     for dframe in [df_commune, df_departement]:
         pop_total_safe = dframe['Population_totale'].replace(0, np.nan)
         menages_total_safe = dframe['Nb_menages_total'].replace(0, np.nan)
@@ -292,15 +191,10 @@ def preparer_donnees_socio(df_iris_base, df_communes_france):
             dframe[new_col] = (dframe[source_col] / pop_total_safe * 100)
         for new_col, source_col in PROPORTIONS_MENAGES.items():
             dframe[new_col] = (dframe[source_col] / menages_total_safe * 100)
-
-        if 'Revenu_median' in dframe.columns:
-            dframe['Revenu_median'] = dframe['Revenu_median'].round(0)
-        if 'Taux_pauvrete' in dframe.columns:
-            dframe['Taux_pauvrete'] = dframe['Taux_pauvrete'].round(1)
-
+        if 'Revenu_median' in dframe.columns: dframe['Revenu_median'] = dframe['Revenu_median'].round(0)
+        if 'Taux_pauvrete' in dframe.columns: dframe['Taux_pauvrete'] = dframe['Taux_pauvrete'].round(1)
         proportion_cols = list(PROPORTIONS_POPULATION.keys()) + list(PROPORTIONS_MENAGES.keys())
         for col in proportion_cols:
-            if col in dframe.columns:
-                dframe[col] = dframe[col].round(1)
+            if col in dframe.columns: dframe[col] = dframe[col].round(1)
 
     return {"IRIS": df, "Commune": df_commune, "Département": df_departement}
