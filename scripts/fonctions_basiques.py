@@ -152,8 +152,7 @@ def preparer_donnees_socio(_df_iris_base, _df_communes_france):
     ]
 
     if communes_incompletes:
-        st.info(
-            f"{len(communes_incompletes)} communes avec données partielles ont été masquées (ex: {communes_incompletes[0]}).")
+        #st.info(f"{len(communes_incompletes)} communes avec données partielles ont été masquées (ex: {communes_incompletes[0]}).")
         df.loc[df['CODE_COM'].isin(communes_incompletes), cols_a_vider] = np.nan
 
     COLS_COMPTAGE = cols_a_vider[:-2]

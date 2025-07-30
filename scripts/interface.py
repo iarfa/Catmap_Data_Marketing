@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from fonctions_cartographie import recherche_etablissements_osm
-
+from config import POI_CONFIG
 
 # ==============================================
 # Fonctions pour la page d'accueil (INCHANGÉES)
@@ -159,3 +159,17 @@ def interface_selection_socio(dict_geodatas):
             st.sidebar.error(f"Données non disponibles pour la maille {maille_choisie}")
 
     return gdf_socio_filtre, colonne_a_afficher, nom_indicateur_final, maille_choisie
+
+
+
+def interface_selection_poi():
+    """
+    Affiche un multiselect dans la sidebar pour choisir les types de POI.
+    Retourne la liste des catégories sélectionnées par l'utilisateur.
+    """
+    st.sidebar.subheader("📍 Points d'Intérêt")
+    selection = st.sidebar.multiselect(
+        "Afficher les générateurs de flux :",
+        options=list(POI_CONFIG.keys())
+    )
+    return selection

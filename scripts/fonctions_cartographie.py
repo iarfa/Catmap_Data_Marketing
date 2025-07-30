@@ -2,10 +2,11 @@ import folium
 import geopandas as gpd
 import pandas as pd
 import requests
-import json
+import time
 import streamlit as st
 import branca.colormap as cm
 from streamlit_folium import st_folium
+from config import POI_CONFIG
 
 
 # ==============================================
@@ -115,17 +116,92 @@ def calculer_isochrone_et_cacher(longitude, latitude, temps_secondes):
     return None
 
 
+# Dictionnaire pour associer une icône à chaque type de POI
+POI_ICONS = {
+    "Gares": {'icon': 'train', 'color': 'darkblue', 'prefix': 'fa'},
+    "Écoles": {'icon': 'graduation-cap', 'color': 'green', 'prefix': 'fa'},
+    "Universités": {'icon': 'university', 'color': 'darkgreen', 'prefix': 'fa'},
+    "Hôpitaux": {'icon': 'hospital', 'color': 'red', 'prefix': 'fa'},
+    "Pharmacies": {'icon': 'plus-square', 'color': 'pink', 'prefix': 'fa'},
+    "Mairies": {'icon': 'landmark', 'color': 'orange', 'prefix': 'fa'},
+    "Supermarchés": {'icon': 'shopping-cart', 'color': 'purple', 'prefix': 'fa'}
+}
+
+
+@st.cache_data
+def rechercher_poi_osm(bounding_box, tags_a_chercher):
+    """
+    Interroge l'API Overpass pour trouver des POI dans une zone géographique donnée.
+
+    :param bounding_box: Tuple (min_lon, min_lat, max_lon, max_lat)
+    :param tags_a_chercher: Dictionnaire de tags, ex: {"amenity": "school"}
+    :return: Un GeoDataFrame avec les POI trouvés.
+    """
+    overpass_url = "http://overpass-api.de/api/interpreter"
+    bbox_str = f"{bounding_box[1]},{bounding_box[0]},{bounding_box[3]},{bounding_box[2]}"
+
+    query_parts = []
+    for tag_key, tag_value in tags_a_chercher.items():
+        query_parts.append(f'node["{tag_key}"="{tag_value}"]({bbox_str});way["{tag_key}"="{tag_value}"]({bbox_str});')
+
+    full_query = f"""
+    [out:json][timeout:25];
+    (
+      {''.join(query_parts)}
+    );
+    out center;
+    """
+
+    try:
+        response = requests.get(overpass_url, params={'data': full_query})
+        response.raise_for_status()
+        data = response.json()
+
+        pois = []
+        for element in data.get('elements', []):
+            lon = element.get('lon')
+            lat = element.get('lat')
+            # Pour les 'ways' (routes, bâtiments), Overpass peut retourner le centre
+            if 'center' in element:
+                lon = element['center'].get('lon')
+                lat = element['center'].get('lat')
+
+            if lon and lat:
+                pois.append({
+                    'name': element.get('tags', {}).get('name', 'N/A'),
+                    'latitude': lat,
+                    'longitude': lon
+                })
+
+        if not pois:
+            return gpd.GeoDataFrame()
+
+        df_pois = pd.DataFrame(pois)
+        gdf = gpd.GeoDataFrame(
+            df_pois,
+            geometry=gpd.points_from_xy(df_pois['longitude'], df_pois['latitude']),
+            crs="EPSG:4326"
+        )
+        return gdf
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erreur de requête Overpass : {e}")
+        return gpd.GeoDataFrame()
+
+
 def creer_carte_enrichie(gdf_etablissements, lat_centre, lon_centre,
                          gdf_socio=None, colonne_socio=None, nom_indicateur_socio=None,
+                         gdf_poi=None,
                          mode_affichage_etablissements='Points', rayon_cercles=1000, temps_isochrones=10,
                          df_coefficients=None):
     """
-    Version finale : Fond gris plus visible pour les zones sans données.
+    Version finale : Crée une carte complète avec toutes les couches et corrections.
     """
     m = folium.Map(location=[lat_centre, lon_centre], zoom_start=11, tiles="OpenStreetMap")
 
     legend_enseignes, colormap, single_value_info = {}, None, None
 
+    # --- Couche Socio-économique ---
     if gdf_socio is not None and not gdf_socio.empty and colonne_socio:
         if colonne_socio not in gdf_socio.columns:
             gdf_socio[colonne_socio] = pd.NA
@@ -147,21 +223,12 @@ def creer_carte_enrichie(gdf_etablissements, lat_centre, lon_centre,
 
             def style_function(feature):
                 value = feature['properties'].get(colonne_socio)
-
-                ### MODIFICATION : GRIS PLUS FONCÉ POUR UNE MEILLEURE VISIBILITÉ ###
                 if pd.isna(value):
-                    return {
-                        'fillColor': '#cccccc',  # Gris plus soutenu
-                        'color': '#999999',  # Bordure assortie
-                        'weight': 1,
-                        'fillOpacity': 0.6,  # Légèrement plus opaque
-                    }
-
+                    return {'fillColor': '#cccccc', 'color': '#999999', 'weight': 1, 'fillOpacity': 0.6}
                 if colormap:
                     return {'fillColor': colormap(value), 'color': 'black', 'weight': 1, 'fillOpacity': 0.7}
                 if single_value_info:
                     return {'fillColor': '#800026', 'color': 'black', 'weight': 1, 'fillOpacity': 0.7}
-
                 return {'fillOpacity': 0, 'weight': 0}
 
             cle_nom = 'NOM_COM' if 'NOM_COM' in gdf_socio_clean.columns else 'NOM_DEP'
@@ -173,13 +240,10 @@ def creer_carte_enrichie(gdf_etablissements, lat_centre, lon_centre,
             )
 
             folium.GeoJson(
-                gdf_socio_clean,
-                name="Données Socio-Éco",
-                style_function=style_function,
-                tooltip=tooltip
+                gdf_socio_clean, name="Données Socio-Éco", style_function=style_function, tooltip=tooltip
             ).add_to(m)
 
-    # --- Le reste de la fonction est inchangé ---
+    # --- Couche des Établissements ---
     if gdf_etablissements is not None and not gdf_etablissements.empty:
         fg_etablissements = folium.FeatureGroup(name="Établissements", show=True).add_to(m)
         couleurs = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628', '#f781bf']
@@ -218,6 +282,26 @@ def creer_carte_enrichie(gdf_etablissements, lat_centre, lon_centre,
                 folium.CircleMarker([row.geometry.y, row.geometry.x], radius=4, color=color, fill=True,
                                     fill_color=color, fill_opacity=0.9, popup=popup,
                                     tooltip=row['nom_etablissement']).add_to(fg_etablissements)
+
+    # --- Couche des Points d'Intérêt (POI) ---
+    if gdf_poi is not None and not gdf_poi.empty:
+        fg_poi = folium.FeatureGroup(name="Points d'Intérêt", show=True).add_to(m)
+
+        for categorie, gdf_categorie in gdf_poi.groupby('categorie'):
+            config = POI_CONFIG.get(categorie, {})
+            icon_config = config.get('icon', {'icon': 'info-sign', 'color': 'gray', 'prefix': 'glyphicon'})
+            singular_name = config.get('singular', categorie)
+
+            for _, poi in gdf_categorie.iterrows():
+                folium.Marker(
+                    location=[poi.geometry.y, poi.geometry.x],
+                    tooltip=f"{singular_name}: {poi['name']}",
+                    icon=folium.Icon(
+                        icon=icon_config['icon'],
+                        color=icon_config['color'],
+                        prefix=icon_config.get('prefix', 'glyphicon')
+                    )
+                ).add_to(fg_poi)
 
     folium.LayerControl().add_to(m)
     return m, legend_enseignes, colormap, single_value_info
