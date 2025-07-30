@@ -118,11 +118,12 @@ def choix_centre_OSM(data):
     lat_centre = coordonnees_centre["latitude"].iloc[0]
     return lat_centre, lon_centre
 
+
 @st.cache_data(show_spinner=False)
 def preparer_donnees_socio(_df_iris_base, _df_communes_france):
     """
-    Nettoie, enrichit, simplifie et prépare les données socio-économiques pour
-    les 3 niveaux d'analyse. Le résultat est mis en cache pour des performances optimales.
+    Nettoie, enrichit, simplifie et prépare les données socio-économiques en gérant
+    les données partielles et les populations nulles.
     """
     df = _df_iris_base.copy()
     try:
@@ -133,14 +134,30 @@ def preparer_donnees_socio(_df_iris_base, _df_communes_france):
     df_ref_deps = _df_communes_france[['Num_Dep', 'Nom_Dep']].drop_duplicates()
     df_ref_deps['Num_Dep'] = df_ref_deps['Num_Dep'].astype(str).str.zfill(2)
 
-    COLS_COMPTAGE = [
+    df['CODE_COM'] = df['IRIS'].str.slice(0, 5)
+    df['CODE_DEPT'] = df['IRIS'].str.slice(0, 2)
+
+    stats_communes = df.groupby('CODE_COM')['Nb_menages_total'].agg(['size', 'count']).reset_index()
+    stats_communes['incomplet'] = (stats_communes['size'] - stats_communes['count']) > stats_communes['count']
+    communes_incompletes = stats_communes[stats_communes['incomplet']]['CODE_COM'].tolist()
+
+    cols_a_vider = [
         'Nb_menages_total', 'Pop_15_24_ans', 'Pop_25_54_ans', 'Pop_55_79_ans', 'Pop_80_ans_plus',
         'Nb_menages_sans_famille', 'Nb_menages_famille', 'Menages_couple_sans_enfant',
         'Menages_couple_avec_enfant', 'Menages_monoparental', 'Menages_agriculteurs_CS1',
         'Menages_artisans_commercants_CS2', 'Menages_cadres_prof_intelectuelles_CS3',
         'Menages_prof_intermediaires_CS4', 'Menages_employes_CS5', 'Menages_ouvriers_CS6',
-        'Menages_retraites_CS7', 'Menages_autres_sans_act_pro_CS8'
+        'Menages_retraites_CS7', 'Menages_autres_sans_act_pro_CS8',
+        'Taux_pauvrete', 'Revenu_median'
     ]
+
+    if communes_incompletes:
+        st.info(
+            f"{len(communes_incompletes)} communes avec données partielles ont été masquées (ex: {communes_incompletes[0]}).")
+        df.loc[df['CODE_COM'].isin(communes_incompletes), cols_a_vider] = np.nan
+
+    COLS_COMPTAGE = cols_a_vider[:-2]
+
     PROPORTIONS_POPULATION = {
         'Part_jeunes_15_24_ans_pct': 'Pop_15_24_ans', 'Part_actifs_25_54_ans_pct': 'Pop_25_54_ans',
         'Part_seniors_55_79_ans_pct': 'Pop_55_79_ans', 'Part_seniors_80_ans_plus_pct': 'Pop_80_ans_plus'
@@ -169,8 +186,6 @@ def preparer_donnees_socio(_df_iris_base, _df_communes_france):
     for new_col, source_col in PROPORTIONS_MENAGES.items():
         df[new_col] = (df[source_col] / menages_total_safe * 100)
 
-    df['CODE_COM'] = df['IRIS'].str.slice(0, 5)
-    df['CODE_DEPT'] = df['IRIS'].str.slice(0, 2)
     df = df.merge(df_ref_deps, left_on='CODE_DEPT', right_on='Num_Dep', how='left')
     df.drop(columns=['Num_Dep'], inplace=True, errors='ignore')
 
@@ -196,5 +211,21 @@ def preparer_donnees_socio(_df_iris_base, _df_communes_france):
         proportion_cols = list(PROPORTIONS_POPULATION.keys()) + list(PROPORTIONS_MENAGES.keys())
         for col in proportion_cols:
             if col in dframe.columns: dframe[col] = dframe[col].round(1)
+
+    ### RÈGLE FINALE : TRAITER LES POPULATIONS NULLES COMME "ND" ###
+    # On ajoute la colonne 'Population_totale' à la liste des colonnes à vider si ce n'est pas déjà fait.
+    cols_a_vider_final = cols_a_vider + ['Population_totale']
+    # On s'assure qu'il n'y a pas de doublons
+    cols_a_vider_final = list(set(cols_a_vider_final))
+
+    for dframe in [df_commune, df_departement]:
+        # On identifie les lignes où la population totale est nulle
+        lignes_a_modifier = dframe['Population_totale'] == 0
+
+        # Pour ces lignes, on met toutes les colonnes d'indicateurs à NaN
+        # pour qu'elles apparaissent comme "ND" sur la carte et dans les tooltips.
+        if lignes_a_modifier.any():
+            colonnes_presentes = [col for col in cols_a_vider_final if col in dframe.columns]
+            dframe.loc[lignes_a_modifier, colonnes_presentes] = np.nan
 
     return {"IRIS": df, "Commune": df_commune, "Département": df_departement}
