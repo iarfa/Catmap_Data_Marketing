@@ -13,6 +13,7 @@ path_etablissement = "../data/Fichier_final_etablissements_commerces_alimentaire
 path_centres_departements = "../data/Centres_departements.xlsx"
 path_communes_france = "../data/Communes_France_Metro.xlsx"
 path_iris_socio = "../data/iris_socio_data_final.parquet"
+path_coeff_trafic = "../data/coefficient_temps_trajet.xlsx"
 
 # =======================
 # 🎨 Personnalisation de la page
@@ -29,5 +30,5 @@ if page == "accueil":
 elif page == "insee":
     page_insee(path_etablissement, path_centres_departements)
 elif page == "osm":
-    page_osm(path_communes_france,path_iris_socio)
+    page_osm(path_communes_france, path_iris_socio, path_coeff_trafic)
 

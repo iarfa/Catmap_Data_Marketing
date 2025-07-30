@@ -305,7 +305,7 @@ INDICATEURS_CONFIG = {
 # Interface de sélection socio
 def interface_recherche_osm(df_geo):
     """
-    Affiche l'interface de recherche d'établissements OSM avec un tri corrigé.
+    Affiche l'interface de recherche d'établissements OSM avec un tri numérique garanti.
     """
     st.subheader("1. Recherche d'établissements")
     noms_etablissements_osm = st.text_input(
@@ -327,20 +327,38 @@ def interface_recherche_osm(df_geo):
         selection_geo = st.multiselect("Choisissez une ou plusieurs régions", regions_disponibles)
 
     elif maille_recherche == 'Département':
-        df_deps = df_geo[['Num_Dep', 'Nom_Dep']].drop_duplicates().sort_values('Num_Dep')
-        df_deps['label'] = df_deps['Num_Dep'].astype(str).str.zfill(2) + " - " + df_deps['Nom_Dep']
-        options_deps = df_deps['label'].tolist()
+        # --- MODIFICATION DÉFINITIVE : Tri numérique robuste ---
+        df_deps = df_geo[['Num_Dep', 'Nom_Dep']].drop_duplicates()
+        # On crée une liste de tuples (numéro_en_int, "label_complet")
+        options_tuples = [
+            (int(row['Num_Dep']), f"{str(row['Num_Dep']).zfill(2)} - {row['Nom_Dep']}")
+            for _, row in df_deps.iterrows() if str(row['Num_Dep']).isdigit()
+        ]
+        # On trie cette liste sur le numéro (le premier élément du tuple)
+        options_tuples.sort(key=lambda x: x[0])
+        # On ne garde que le label pour l'affichage
+        options_deps = [label for num, label in options_tuples]
+
         selection_labels = st.multiselect("Choisissez un ou plusieurs départements", options_deps)
-        selection_geo = df_deps[df_deps['label'].isin(selection_labels)]['Nom_Dep'].tolist()
+        # On retrouve le nom du département à partir du label sélectionné
+        noms_deps_selectionnes = [label.split(' - ')[1] for label in selection_labels]
+        selection_geo = df_geo[df_geo['Nom_Dep'].isin(noms_deps_selectionnes)]['Nom_Dep'].unique().tolist()
+
 
     elif maille_recherche == 'Commune':
-        df_deps = df_geo[['Num_Dep', 'Nom_Dep']].drop_duplicates().sort_values('Num_Dep')
-        df_deps['label'] = df_deps['Num_Dep'].astype(str).str.zfill(2) + " - " + df_deps['Nom_Dep']
-        options_deps = df_deps['label'].tolist()
+        # --- MODIFICATION DÉFINITIVE : Tri numérique robuste ---
+        df_deps = df_geo[['Num_Dep', 'Nom_Dep']].drop_duplicates()
+        options_tuples = [
+            (int(row['Num_Dep']), f"{str(row['Num_Dep']).zfill(2)} - {row['Nom_Dep']}")
+            for _, row in df_deps.iterrows() if str(row['Num_Dep']).isdigit()
+        ]
+        options_tuples.sort(key=lambda x: x[0])
+        options_deps = [label for num, label in options_tuples]
+
         dep_pour_communes_labels = st.multiselect("D'abord, sélectionnez un ou plusieurs départements", options_deps)
         if dep_pour_communes_labels:
-            deps_selectionnes = df_deps[df_deps['label'].isin(dep_pour_communes_labels)]['Nom_Dep'].tolist()
-            communes_disponibles = sorted(df_geo[df_geo['Nom_Dep'].isin(deps_selectionnes)]['Nom_Ville'].unique())
+            noms_deps_selectionnes = [label.split(' - ')[1] for label in dep_pour_communes_labels]
+            communes_disponibles = sorted(df_geo[df_geo['Nom_Dep'].isin(noms_deps_selectionnes)]['Nom_Ville'].unique())
             selection_geo = st.multiselect("Puis, choisissez une ou plusieurs communes", communes_disponibles)
 
     if st.button("Lancer la recherche", key="recherche_osm_nouveau", type="primary"):
