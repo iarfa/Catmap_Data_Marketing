@@ -591,61 +591,80 @@ def affichage_isochrones_osm(data, lat_centre, lon_centre):
 # Carte enrichie de données socio-économiques
 def creer_carte_enrichie(gdf_etablissements, lat_centre, lon_centre,
                          gdf_socio=None, colonne_socio=None, nom_indicateur_socio=None,
-                         mode_affichage_etablissements='Points', rayon_cercles=1000, temps_isochrones=10):
+                         mode_affichage_etablissements='Points', rayon_cercles=1000, temps_isochrones=10,
+                         df_coefficients=None):
     m = folium.Map(location=[lat_centre, lon_centre], zoom_start=11, tiles="OpenStreetMap")
-    type_to_color = {}
 
-    # --- Couche Socio-économique (dessinée en premier) ---
+    type_to_color = {}
+    colormap = None
+    single_value_info = None
+
+    # --- Couche Socio-économique ---
     if gdf_socio is not None and not gdf_socio.empty and colonne_socio is not None:
         gdf_socio_clean = gdf_socio.dropna(subset=[colonne_socio]).copy()
+
         if not gdf_socio_clean.empty:
-            colormap = None
             if gdf_socio_clean[colonne_socio].nunique() > 1:
                 min_val, max_val = gdf_socio_clean[colonne_socio].min(), gdf_socio_clean[colonne_socio].max()
                 colormap = cm.LinearColormap(colors=['#ffffcc', '#fd8d3c', '#800026'], vmin=min_val, vmax=max_val)
                 colormap.caption = f"{nom_indicateur_socio or colonne_socio}"
                 colormap.add_to(m)
 
+                legend_id = colormap.get_name()
+                css_fix = f'''
+                <style>
+                    #{legend_id} {{
+                        position: fixed !important; bottom: 20px !important; left: 20px !important; z-index: 9999 !important;
+                    }}
+                </style>
+                '''
+                m.get_root().html.add_child(folium.Element(css_fix))
+
+            elif gdf_socio_clean[colonne_socio].nunique() == 1:
+                single_value_info = {"label": nom_indicateur_socio, "value": gdf_socio_clean[colonne_socio].iloc[0]}
+
             def style_function(feature):
                 value = feature['properties'][colonne_socio]
-                if pd.isna(value) or value == 0:
-                    return {'fillColor': '#f0f0f0', 'color': '#bdbdbd', 'weight': 1, 'fillOpacity': 0.5}
+                if pd.isna(value) or value == 0: return {'fillColor': '#f0f0f0', 'color': '#bdbdbd', 'weight': 1,
+                                                         'fillOpacity': 0.5}
                 if colormap:
                     return {'fillColor': colormap(value), 'color': 'black', 'weight': 1, 'fillOpacity': 0.7}
                 else:
                     return {'fillColor': '#800026', 'color': 'black', 'weight': 1, 'fillOpacity': 0.7}
 
-            def format_value_for_tooltip(val):
+            def format_value(val):
                 if pd.isna(val): return "N/A"
-                if "_pct" in colonne_socio or "Taux" in colonne_socio: return f"{val:,.1f}".replace(",", " ")
+                if "_pct" in (colonne_socio or "") or "Taux" in (colonne_socio or ""): return f"{val:,.1f}".replace(",",
+                                                                                                                    " ")
                 return f"{val:,.0f}".replace(",", " ")
 
-            gdf_socio_clean['tooltip_value'] = gdf_socio_clean[colonne_socio].apply(format_value_for_tooltip)
-            if 'Nom_Dep' in gdf_socio_clean.columns and 'NOM_COM' in gdf_socio_clean.columns:
+            gdf_socio_clean['tooltip_value'] = gdf_socio_clean[colonne_socio].apply(format_value)
+            if 'Nom_Dep' in gdf_socio_clean.columns:
                 gdf_socio_clean['tooltip_label'] = gdf_socio_clean['CODE_DEPT'] + ' - ' + gdf_socio_clean[
                     'Nom_Dep'] + ' - ' + gdf_socio_clean['NOM_COM']
             else:
                 cle_geo = next((col for col in ['CODE_DEPT', 'CODE_COM', 'IRIS'] if col in gdf_socio_clean.columns),
                                None)
                 gdf_socio_clean['tooltip_label'] = gdf_socio_clean[cle_geo]
+            gdf_socio_clean['html_tooltip'] = "<b>Zone :</b> " + gdf_socio_clean['tooltip_label'] + "<br>" + "<b>" + (
+                        nom_indicateur_socio or colonne_socio) + " :</b> " + gdf_socio_clean['tooltip_value']
 
             folium.GeoJson(
                 gdf_socio_clean, name=nom_indicateur_socio or "Données Socio-Éco",
                 style_function=style_function, interactive=True,
-                tooltip=folium.features.GeoJsonTooltip(fields=['tooltip_label', 'tooltip_value'],
-                                                       aliases=["Zone :", f"{nom_indicateur_socio or colonne_socio} :"],
-                                                       localize=True, sticky=False)
+                tooltip=folium.features.GeoJsonTooltip(
+                    fields=['html_tooltip'], aliases=[''], labels=False,
+                    style=("background-color: white; color: black; font-family: arial; font-size: 14px; padding: 10px;")
+                )
             ).add_to(m)
 
-    # --- Couche des Établissements (dessinée en dernier) ---
+    # --- Couche des Établissements ---
     if gdf_etablissements is not None and not gdf_etablissements.empty:
         fg_etablissements = folium.FeatureGroup(name="Établissements Concurrents", show=True)
         couleurs = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628', '#f781bf']
         enseignes_uniques = gdf_etablissements['nom_etablissement'].unique()
         type_to_color = {nom: couleurs[i % len(couleurs)] for i, nom in enumerate(enseignes_uniques)}
         popup_base = "<b>Nom entreprise :</b> {etab}<br><b>Adresse :</b> {adr}<br><b>Précision :</b> {prec}"
-
-        # --- MODIFIÉ : On réintègre la logique des 3 modes d'affichage ---
 
         if mode_affichage_etablissements == 'Points':
             for _, row in gdf_etablissements.iterrows():
@@ -665,51 +684,66 @@ def creer_carte_enrichie(gdf_etablissements, lat_centre, lon_centre,
                 popup_html = popup_base.format(etab=row.get('nom_etablissement', 'N/A'),
                                                adr=row.get('adresse_simplifiee', 'N/A'),
                                                prec=row.get('precision_geocodage', 'N/A'))
-                folium.Circle(
-                    location=[row.geometry.y, row.geometry.x], radius=rayon_cercles,
-                    color=color, fill=True, fill_color=color, fill_opacity=0.2
-                ).add_to(fg_etablissements)
-                folium.CircleMarker(
-                    location=[row.geometry.y, row.geometry.x], radius=4, color=color, fill=True,
-                    fill_color=color, fill_opacity=0.9, popup=folium.Popup(popup_html, max_width=300),
-                    tooltip=row['nom_etablissement']
-                ).add_to(fg_etablissements)
+                folium.Circle(location=[row.geometry.y, row.geometry.x], radius=rayon_cercles, color=color, fill=True,
+                              fill_color=color, fill_opacity=0.2).add_to(fg_etablissements)
+                folium.CircleMarker(location=[row.geometry.y, row.geometry.x], radius=4, color=color, fill=True,
+                                    fill_color=color, fill_opacity=0.9, popup=folium.Popup(popup_html, max_width=300),
+                                    tooltip=row['nom_etablissement']).add_to(fg_etablissements)
 
         elif mode_affichage_etablissements == 'Isochrones':
-            locations_for_api = gdf_etablissements.geometry.apply(lambda p: [p.x, p.y]).tolist()
-            ors_url = "http://localhost:8080/ors/v2/isochrones/driving-car"
-            payload = {"locations": locations_for_api, "range": [temps_isochrones * 60]}
-            headers = {'Content-Type': 'application/json'}
-            try:
-                with st.spinner(f"Calcul des isochrones de {temps_isochrones} minutes..."):
-                    response = requests.post(ors_url, json=payload, headers=headers, timeout=60)
-                response.raise_for_status()
-                isochrones_data = response.json()
-                for i, feature in enumerate(isochrones_data.get('features', [])):
-                    enseigne = gdf_etablissements.iloc[i]['nom_etablissement']
-                    color = type_to_color.get(enseigne, 'gray')
-                    folium.GeoJson(
-                        feature,
-                        style_function=lambda x, c=color: {'fillColor': c, 'color': c, 'weight': 2, 'fillOpacity': 0.2}
-                    ).add_to(fg_etablissements)
-                for _, row in gdf_etablissements.iterrows():
-                    popup_html = popup_base.format(etab=row.get('nom_etablissement', 'N/A'),
-                                                   adr=row.get('adresse_simplifiee', 'N/A'),
-                                                   prec=row.get('precision_geocodage', 'N/A'))
-                    folium.CircleMarker(
-                        location=[row.geometry.y, row.geometry.x], radius=4,
-                        color=type_to_color.get(row['nom_etablissement'], 'gray'), fill=True,
-                        fill_color=type_to_color.get(row['nom_etablissement'], 'gray'), fill_opacity=0.9,
-                        popup=folium.Popup(popup_html, max_width=300),
-                        tooltip=row['nom_etablissement']
-                    ).add_to(fg_etablissements)
-            except requests.exceptions.ConnectionError:
-                st.error("⚠️ Connexion au service d'isochrones local impossible. Vérifiez que Docker est lancé.")
-            except Exception as e:
-                st.error(f"Une erreur est survenue lors du calcul des isochrones : {e}")
+            with st.spinner(f"Calcul des isochrones en cours (simulation trafic)..."):
+                try:
+                    for index, row in gdf_etablissements.iterrows():
+                        ville_etablissement = row['ville']
+                        coeff_row = pd.DataFrame()
+                        if df_coefficients is not None and not df_coefficients.empty:
+                            coeff_row = df_coefficients[
+                                df_coefficients['ville'].str.lower() == ville_etablissement.lower()]
+
+                        coefficient = 0.9  # Coefficient par défaut pour les villes non listées
+                        if not coeff_row.empty:
+                            coefficient = coeff_row['coefficient'].iloc[0]
+
+                        temps_ajuste_secondes = (temps_isochrones * coefficient) * 60
+
+                        location = [[row.geometry.x, row.geometry.y]]
+                        ors_url = "http://localhost:8080/ors/v2/isochrones/driving-car"
+                        payload = {"locations": location, "range": [temps_ajuste_secondes]}
+                        headers = {'Content-Type': 'application/json'}
+
+                        response = requests.post(ors_url, json=payload, headers=headers, timeout=20)
+                        response.raise_for_status()
+                        isochrone_data = response.json()
+
+                        if isochrone_data.get('features'):
+                            feature = isochrone_data['features'][0]
+                            enseigne = row['nom_etablissement']
+                            color = type_to_color.get(enseigne, 'gray')
+                            folium.GeoJson(
+                                feature,
+                                style_function=lambda x, c=color: {'fillColor': c, 'color': c, 'weight': 2,
+                                                                   'fillOpacity': 0.2}
+                            ).add_to(fg_etablissements)
+
+                    for _, row in gdf_etablissements.iterrows():
+                        popup_html = popup_base.format(etab=row.get('nom_etablissement', 'N/A'),
+                                                       adr=row.get('adresse_simplifiee', 'N/A'),
+                                                       prec=row.get('precision_geocodage', 'N/A'))
+                        folium.CircleMarker(
+                            location=[row.geometry.y, row.geometry.x], radius=4,
+                            color=type_to_color.get(row['nom_etablissement'], 'gray'), fill=True,
+                            fill_color=type_to_color.get(row['nom_etablissement'], 'gray'), fill_opacity=0.9,
+                            popup=folium.Popup(popup_html, max_width=300),
+                            tooltip=row['nom_etablissement']
+                        ).add_to(fg_etablissements)
+
+                except requests.exceptions.ConnectionError:
+                    st.error("⚠️ Connexion au service d'isochrones local impossible. Vérifiez que Docker est lancé.")
+                except Exception as e:
+                    st.error(f"Une erreur est survenue lors du calcul des isochrones : {e}")
 
         fg_etablissements.add_to(m)
 
     folium.LayerControl().add_to(m)
 
-    return m, type_to_color
+    return m, type_to_color, colormap, single_value_info

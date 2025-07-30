@@ -54,6 +54,15 @@ def charger_donnees_iris_socio(path_iris_socio):
         st.error(f"Fichier de données socio-économiques introuvable au chemin : {path_iris_socio}")
         return None
 
+@st.cache_data
+def charger_coefficients_trafic(path_coeff_trafic):
+    """Charge la table des coefficients de trafic par ville."""
+    try:
+        return pd.read_excel(path_coeff_trafic)
+    except FileNotFoundError:
+        st.warning(f"Fichier des coefficients de trafic introuvable : {path_coeff_trafic}. Le trafic ne sera pas simulé.")
+        return pd.DataFrame(columns=['ville', 'coefficient'])
+
 # Aperçu des données
 def apercu_donnees(data, nb_lignes):
     """
@@ -204,11 +213,20 @@ def choix_centre_OSM(data):
 # Préparation des données socio-économiques
 def preparer_donnees_socio(df_iris_base, df_communes_france):
     """
-    Nettoie, enrichit et prépare les données socio-économiques pour les 3 niveaux d'analyse,
-    en conservant les NaN pour les indicateurs pertinents.
+    Nettoie, enrichit, simplifie et prépare les données socio-économiques pour
+    les 3 niveaux d'analyse : IRIS, Commune, et Département.
     """
     df = df_iris_base.copy()
 
+    # --- AJOUT : Simplification des géométries pour la performance ---
+    # La tolérance est généralement en mètres si votre CRS est projeté (ex: Lambert-93).
+    # Une valeur plus élevée augmente la simplification et les performances.
+    try:
+        df['geometry'] = df['geometry'].simplify(tolerance=100, preserve_topology=True)
+    except Exception as e:
+        st.warning(f"Avertissement lors de la simplification des géométries : {e}")
+
+    # --- Étape 1 : Configuration centralisée (inchangée) ---
     df_ref_deps = df_communes_france[['Num_Dep', 'Nom_Dep']].drop_duplicates()
     df_ref_deps['Num_Dep'] = df_ref_deps['Num_Dep'].astype(str).str.zfill(2)
 
@@ -235,25 +253,24 @@ def preparer_donnees_socio(df_iris_base, df_communes_france):
         'Part_autres_CS8_pct': 'Menages_autres_sans_act_pro_CS8'
     }
 
-    # Nettoyage des colonnes de comptage (un NaN ici signifie bien 0)
+    # --- Étape 2 : Nettoyage et Ingénierie de variables (inchangée) ---
     for col in COLS_COMPTAGE:
         if col in df.columns:
             df[col] = df[col].fillna(0).round(0).astype(int)
 
-    # Ingénierie de variables
     df['Population_totale'] = df[list(PROPORTIONS_POPULATION.values())].sum(axis=1)
     pop_total_safe = df['Population_totale'].replace(0, np.nan)
     menages_total_safe = df['Nb_menages_total'].replace(0, np.nan)
 
-    # On ne remplit PAS les NaN par 0 pour garder le sens de "donnée non disponible"
     for new_col, source_col in PROPORTIONS_POPULATION.items():
         df[new_col] = (df[source_col] / pop_total_safe * 100)
     for new_col, source_col in PROPORTIONS_MENAGES.items():
         df[new_col] = (df[source_col] / menages_total_safe * 100)
 
-    # Agrégation et jointure
+    # --- Étape 3 : Agrégation (inchangée) ---
     df['CODE_COM'] = df['IRIS'].str.slice(0, 5)
     df['CODE_DEPT'] = df['IRIS'].str.slice(0, 2)
+
     df = df.merge(df_ref_deps, left_on='CODE_DEPT', right_on='Num_Dep', how='left')
     df.drop(columns=['Num_Dep'], inplace=True, errors='ignore')
 
@@ -267,7 +284,7 @@ def preparer_donnees_socio(df_iris_base, df_communes_france):
     df_departement = df_commune.dissolve(by='CODE_DEPT', aggfunc=agg_funcs, as_index=False)
     df_departement['NOM_COM'] = df_departement['Nom_Dep']
 
-    # Recalcul et formatage final
+    # --- Étape 4 : Recalcul et formatage final (inchangée) ---
     for dframe in [df_commune, df_departement]:
         pop_total_safe = dframe['Population_totale'].replace(0, np.nan)
         menages_total_safe = dframe['Nb_menages_total'].replace(0, np.nan)
@@ -276,7 +293,6 @@ def preparer_donnees_socio(df_iris_base, df_communes_france):
         for new_col, source_col in PROPORTIONS_MENAGES.items():
             dframe[new_col] = (dframe[source_col] / menages_total_safe * 100)
 
-        # On arrondit sans remplir les NaN
         if 'Revenu_median' in dframe.columns:
             dframe['Revenu_median'] = dframe['Revenu_median'].round(0)
         if 'Taux_pauvrete' in dframe.columns:
