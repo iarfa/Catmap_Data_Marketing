@@ -2,7 +2,6 @@ import folium
 import geopandas as gpd
 import pandas as pd
 import requests
-import json
 import time
 import streamlit as st
 import branca.colormap as cm
