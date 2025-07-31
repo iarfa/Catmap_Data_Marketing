@@ -1,55 +1,57 @@
-# 📌 Projet d'API Streamlit pour Cartographie Interactive
+🗺️ API d'Analyse Géospatiale et Concurrentielle
+🚀 Objectif du Projet
+Développer une application web d'aide à la décision pour les entreprises disposant de réseaux physiques (commerces, agences). L'outil remplace les analyses basées sur l'intuition par une approche pilotée par la donnée géospatiale, permettant d'effectuer des études concurrentielles et des diagnostics de territoire précis.
 
-## 🚀 Objectif du Projet
-Développement d'une API avec **Streamlit** permettant l'affichage d'informations sur une **carte interactive** à partir de données issues de la base **SIREN** et d'autres sources **opendata**.
+🎯 Fonctionnalités Clés
+L'application est construite autour de plusieurs modules d'analyse interactifs :
 
-## 🎯 Fonctionnalités Principales
-L'application offre trois types d'affichage sur la carte interactive :
-1. **Points** : Affichage simple des entreprises.
-2. **Points avec cercles de rayon R** : Affichage avec une zone de couverture définie autour des points.
-3. **Isochrones** : Calcul des zones accessibles en fonction d'un temps ou d'une distance.
+Recherche de Concurrents : Recherche multi-enseignes via OpenStreetMap sur des zones géographiques définies (Région, Département, Commune).
 
-## 🔎 Modes de Recherche
-L'utilisateur peut obtenir des résultats de trois manières différentes :
-1. **Saisie d'une adresse** :
-   - Conversion de l'adresse en coordonnées (x, y).
-   - Sélection d'un secteur (villes concernées).
-   - Affichage des entreprises selon les options ci-dessus.
-2. **Sélection d'un secteur et d'une zone géographique** :
-   - Définition manuelle d'un secteur.
-   - Affichage des entreprises.
-3. **Recherche par nom d'entreprise** :
-   - Utilisation d'une API externe pour récupérer les coordonnées de l'entreprise.
-   - Affichage des entreprises correspondantes.
+Visualisation Multi-Modes : Chaque concurrent peut être visualisé de trois manières sur la carte :
 
-## 📍 Technologies Utilisées
-- **Langage** : Python 🐍
-- **Framework UI** : Streamlit 🎨
-- **Cartographie** : Folium 🗺️
-- **Données routières** : OSMnx (graphes OSM) 🚗
-- **Calcul d’isochrones** : OpenRouteService (ORS) avec une alternative en développement ⏳
-- **Base de données** : En cours d’étude (PostgreSQL/PostGIS, SQLite, Parquet...)
-- **Enrichissement des données** : Sources opendata 📊
+Points simples : Localisation précise.
 
-## ⚠️ Problèmes Actuels
-1. **Performance des isochrones** :
-   - L’utilisation d’OSMnx pour charger les graphes routiers par département fonctionne mais ralentit le traitement avec un grand nombre de points.
-   - Une alternative est en cours de développement pour optimiser les calculs.
-2. **Stockage des données** :
-   - Actuellement, les données sont envisagées en local.
-   - Recherche d’une solution optimale (PostgreSQL/PostGIS, SQLite, fichiers Parquet...).
-3. **Affichage d’un grand nombre de points** :
-   - Folium peut être limité pour afficher trop de points simultanément.
-   - Étude d’alternatives comme le clustering ou l'utilisation d'autres bibliothèques (Kepler.gl via Pydeck).
+Cercles d'influence : Zone de chalandise simple (rayon en mètres).
 
-## 🛠️ Prochaines Étapes
-- [ ] Définir la structure du projet.
-- [ ] Choisir le mode de stockage des données.
-- [ ] Optimiser le calcul des isochrones.
-- [ ] Améliorer l’affichage de la carte pour les grands ensembles de données.
-- [ ] Mettre en place une première version fonctionnelle.
-- [ ] Ajouter des données opendata (stage à venir)
+Isochrones : Zone de chalandise réelle (temps de trajet en voiture), calculée via une instance OpenRouteService et ajustée par un coefficient de trafic pour simuler les conditions réelles.
 
----
-💡 **Objectif final** : Fournir une API fluide et performante pour la visualisation de données entreprises sur une carte interactive, avec un calcul optimisé des zones de couverture.
+Analyse Socio-Économique : Superposition d'une couche de données choroplèthe pour analyser le contexte local. L'analyse est multi-échelles (IRIS, Commune, Département) et multi-indicateurs (revenus, démographie, CSP, etc.).
 
+Enrichissement par Points d'Intérêt (POI) : Affichage des générateurs de flux (gares, écoles, hôpitaux...) autour des zones d'étude pour qualifier l'environnement commercial.
+
+🛠️ Stack Technique
+Langage : Python 🐍
+
+Framework UI : Streamlit 🎨
+
+Analyse de Données : Pandas, GeoPandas, NumPy
+
+Cartographie Interactive : Folium & streamlit-folium 🗺️
+
+Moteur d'Isochrones : Instance OpenRouteService auto-hébergée sur Docker 🐳
+
+Requêtes API : requests (pour interroger les API OpenStreetMap).
+
+📂 Sources de Données (Open Data)
+Concurrents & POI : OpenStreetMap (via les API Nominatim et Overpass).
+
+Données Socio-Démographiques : Fichiers des carreaux IRIS de l'INSEE.
+
+Fonds de carte & Géométries : IGN (via le fichier des communes de France).
+
+Simulation de trafic : Coefficients de temps de trajet basés sur les données des grandes agglomérations.
+
+🏗️ Architecture du Code
+Le projet est structuré en modules avec des responsabilités claires pour faciliter la maintenance et l'évolutivité :
+
+main.py : Point d'entrée de l'application et gestionnaire de la navigation.
+
+page_osm.py : Script principal de la page d'analyse, orchestrant les appels aux modules.
+
+fonctions_basiques.py : Fonctions de chargement et de préparation des données (sans interface).
+
+fonctions_cartographie.py : Fonctions de création de la carte et d'interaction avec les API géospatiales (ORS, Overpass).
+
+interface.py : Fonctions construisant les composants UI avec Streamlit (sidebar, sélecteurs...).
+
+config.py : Fichier central pour les dictionnaires et variables de configuration (ex: POI).
