@@ -45,30 +45,7 @@ Le projet est structuré en modules avec des responsabilités claires pour facil
 * `interface.py` : Fonctions construisant les composants UI avec Streamlit (sidebar, sélecteurs...).
 * `config.py` : Fichier central pour les dictionnaires et variables de configuration (ex: POI).
 
-## ⚙️ Installation et Lancement
 
-1.  **Prérequis** : Assurez-vous d'avoir Python 3.10+ et Docker installés.
-
-2.  **Cloner le projet** :
-    ```bash
-    git clone [URL_DU_PROJET]
-    cd [NOM_DU_DOSSIER]
-    ```
-
-3.  **Installer les dépendances Python** :
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4.  **Lancer le moteur d'isochrones ORS** :
-    ```bash
-    docker-compose up -d
-    ```
-
-5.  **Lancer l'application Streamlit** :
-    ```bash
-    streamlit run main.py
-    ```
 
 ## 🔮 Prochaines Étapes
 
